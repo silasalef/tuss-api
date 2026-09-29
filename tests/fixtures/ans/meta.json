@@ -1,0 +1,33 @@
+{
+  "/ANS/source": {
+    "status": 200,
+    "segundos": 0.279,
+    "bytes": 5145,
+    "cabecalhos": {
+      "server": "nginx",
+      "date": "Tue, 29 Sep 2026 20:31:16 GMT",
+      "content-type": "application/json",
+      "content-length": "5145",
+      "x-frame-options": "sameorigin",
+      "strict-transport-security": "max-age=31536000",
+      "connection": "close"
+    },
+    "coletado_em": "2026-09-29T20:33:58+00:00"
+  },
+  "/ANS/concepts/tuss-22?page=1": {
+    "status": 200,
+    "segundos": 162.894,
+    "bytes": 4986,
+    "cabecalhos": {
+      "server": "nginx",
+      "date": "Tue, 29 Sep 2026 20:33:58 GMT",
+      "content-type": "application/json",
+      "content-length": "4986",
+      "pages": "239",
+      "x-frame-options": "sameorigin",
+      "strict-transport-security": "max-age=31536000",
+      "connection": "close"
+    },
+    "coletado_em": "2026-09-29T20:33:58+00:00"
+  }
+}

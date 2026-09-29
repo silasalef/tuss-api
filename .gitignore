@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+build/
+dist/
+
+# Ferramentas
+.hypothesis/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Segredos e configuração local
+.env
+.env.*
+!.env.example
+
+# Dados: arquivos da ANS e snapshots ficam fora do repositório
+# (só as fixtures pequenas de tests/fixtures/ans entram)
+dados/
+*.zip
+
+# Editores e sistema
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
