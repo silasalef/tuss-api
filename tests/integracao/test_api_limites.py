@@ -74,6 +74,7 @@ async def test_get_traz_etag_e_cache_control(cliente: httpx.AsyncClient, carrega
     assert r.headers["etag"].startswith('"')
     assert r.headers["cache-control"] == CACHE_CONTROL
     assert r.headers["vary"] == "Authorization"
+    assert r.headers["content-type"] == "application/json"  # sem ele o navegador não formata
 
 
 async def test_mesma_versao_responde_304_sem_corpo(

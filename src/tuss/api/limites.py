@@ -100,7 +100,9 @@ async def _cache_http(
     }
     if etag in _etags_do_cliente(request):
         return Response(status_code=304, headers=cabecalhos)
-    return Response(corpo, 200, headers=cabecalhos, media_type=resposta.media_type)
+    # O tipo (application/json) vem do cabeçalho original: o atributo media_type chega vazio aqui.
+    cabecalhos["Content-Type"] = resposta.headers["content-type"]
+    return Response(corpo, 200, headers=cabecalhos)
 
 
 def _etags_do_cliente(request: Request) -> set[str]:
