@@ -18,7 +18,7 @@ import httpx
 import structlog
 
 from tuss.config import Config
-from tuss.ingestion.ciclo import ResultadoTabela, executar_ciclo
+from tuss.ingestion.ciclo import AVISO_ARQUIVO_NOVO, ResultadoTabela, executar_ciclo
 from tuss.ingestion.fonte import ClienteANS
 
 log = structlog.get_logger("tuss.worker")
@@ -42,9 +42,18 @@ async def rodar_ciclo(config: Config) -> list[ResultadoTabela]:
         await _avisar(config, ok=False, resumo="ciclo falhou antes de terminar")
         raise
     falhas = [r for r in resultados if r.status == "falhou"]
-    resumo = ", ".join(f"{r.tabela}: {r.status}" for r in resultados)
+    avisos = [f"{r.tabela}: {r.detalhe}" for r in resultados if r.detalhe == AVISO_ARQUIVO_NOVO]
+    resumo = "\n".join(
+        [*avisos, *(f"{r.tabela}: {r.status} {r.detalhe}".strip() for r in resultados)]
+    )
     minutos = (datetime.now(UTC) - inicio).total_seconds() / 60
-    log.info("ciclo_fim", tabelas=len(resultados), falhas=len(falhas), minutos=round(minutos))
+    log.info(
+        "ciclo_fim",
+        tabelas=len(resultados),
+        falhas=len(falhas),
+        avisos=len(avisos),
+        minutos=round(minutos),
+    )
     await _avisar(config, ok=not falhas, resumo=resumo)
     return resultados
 

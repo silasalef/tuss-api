@@ -10,7 +10,8 @@ import pytest
 from conftest import BancoDeTeste
 
 from tuss.config import PAPEL_API, Config
-from tuss.ingestion.ciclo import executar_ciclo
+from tuss.ingestion.ciclo import AVISO_ARQUIVO_NOVO, executar_ciclo
+from tuss.ingestion.coleta import coletar
 from tuss.ingestion.fonte import ClienteANS
 
 FIXTURES = Path(__file__).parents[1] / "fixtures" / "ans"
@@ -108,3 +109,22 @@ async def test_ans_fora_do_ar_nao_derruba_o_ciclo(bd: BancoDeTeste, config: Conf
         ("tuss-22", "publicada"),
         ("tuss-23", "publicada"),
     ]
+
+
+async def test_novidade_em_tabela_gigante_avisa_para_conferir_o_portal(
+    config: Config, tmp_path: Path
+) -> None:
+    # tuss-19 carregada (aqui, com poucos registros); o catálogo diz 1,4 milhão.
+    opme = [{**r, "source": "tuss-19"} for r in TUSS_22]
+    ans = ANSFalsa({"tuss-19": opme})
+    async with ClienteANS(transporte=httpx.MockTransport(ans), espera_base_s=0) as cliente:
+        await coletar("tuss-19", cliente, config, modo="completa")
+
+    novo = {**opme[0], "id": "99999999", "display_name": "OPME nova"}
+    ans.tabelas = {"tuss-19": [novo, *opme], "tuss-22": TUSS_22, "tuss-23": TUSS_23}
+    async with ClienteANS(transporte=httpx.MockTransport(ans), espera_base_s=0) as cliente:
+        resultados = await executar_ciclo(cliente, config, AGORA)
+
+    opme_resultado = next(r for r in resultados if r.tabela == "tuss-19")
+    assert (opme_resultado.status, opme_resultado.detalhe) == ("publicada", AVISO_ARQUIVO_NOVO)
+    assert all(r.detalhe != AVISO_ARQUIVO_NOVO for r in resultados if r.tabela != "tuss-19")

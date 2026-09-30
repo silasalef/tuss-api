@@ -206,3 +206,18 @@ async def test_incremental_interrompida_e_refeita(bd: BancoDeTeste, config: Conf
     assert (resultado.carga_id, resultado.status) == (3, "sem_mudanca")
     abandonada = (await bd.executar(PAPEL_API, "SELECT status, erro FROM carga WHERE id = 2"))[0]
     assert tuple(abandonada) == ("falhou", "interrompida no meio; refeita")
+
+
+async def test_completa_em_trechos(bd: BancoDeTeste, config: Config) -> None:
+    ans = ANSFalsa(REGISTROS)
+    primeiro = await _coletar(ans, config, max_paginas=2)
+    assert (primeiro.status, primeiro.paginas_lidas) == ("em_andamento", 2)
+    assert "limite desta execução" in (primeiro.motivo or "")
+    assert await _um(bd, "SELECT checkpoint FROM carga") == 2
+
+    segundo = await _coletar(ans, config, max_paginas=2)
+    assert (segundo.carga_id, segundo.status, segundo.paginas_lidas) == (1, "em_andamento", 2)
+
+    terceiro = await _coletar(ans, config, max_paginas=2)
+    assert (terceiro.carga_id, terceiro.status, terceiro.total) == (1, "publicada", 25)
+    assert ans.pedidas == [1, 2, 3, 4, 5]

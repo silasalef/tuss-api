@@ -5,7 +5,8 @@ Dois modos:
 - **completa**: lê todas as páginas. Cada página vai para o rascunho numa transação
   própria, com `checkpoint` = última página gravada; se a fonte cair, a próxima
   execução retoma dali. No fim, publica como a importação de arquivo (com remoções e
-  limite de anomalia). Se o número de páginas mudar no meio, a ANS publicou algo
+  limite de anomalia). Pode ser dividida em trechos (`max_paginas` por execução),
+  retomados a cada execução. Se o número de páginas mudar no meio, a ANS publicou algo
   durante a leitura: a carga falha e a próxima começa do zero.
 - **incremental**: lê a partir da página 1 (onde a ANS põe os códigos mais novos) e
   para depois de 2 páginas seguidas só com códigos já publicados e sem alteração.
@@ -58,16 +59,24 @@ class ResultadoColeta:
 
 
 async def coletar(
-    tabela: str, cliente: ClienteANS, config: Config, modo: Modo | None = None
+    tabela: str,
+    cliente: ClienteANS,
+    config: Config,
+    modo: Modo | None = None,
+    max_paginas: int | None = None,
 ) -> ResultadoColeta:
-    """Coleta a tabela. Sem `modo`: incremental se já tem carga publicada, senão completa."""
+    """Coleta a tabela. Sem `modo`: incremental se já tem carga publicada, senão completa.
+
+    `max_paginas`: na coleta completa, para depois de ler tantas páginas e deixa a carga
+    em andamento; a próxima execução continua dali. Divide tabelas grandes em trechos.
+    """
     engine = criar_engine(config, PAPEL_INGESTAO)
     try:
         async with engine.connect() as trava:
             if not await _pegar_trava_da_coleta(trava, tabela):
                 raise ColetaRecusada(f"outra coleta de {tabela} está rodando agora")
             try:
-                return await _coletar(engine, tabela, cliente, config, modo)
+                return await _coletar(engine, tabela, cliente, config, modo, max_paginas)
             finally:
                 await trava.execute(
                     text("SELECT pg_advisory_unlock(hashtext(:k))"), {"k": "coleta:" + tabela}
@@ -92,12 +101,28 @@ async def _pegar_trava_da_coleta(con: AsyncConnection, tabela: str) -> bool:
 
 
 async def _coletar(
-    engine: AsyncEngine, tabela: str, cliente: ClienteANS, config: Config, modo: Modo | None
+    engine: AsyncEngine,
+    tabela: str,
+    cliente: ClienteANS,
+    config: Config,
+    modo: Modo | None,
+    max_paginas: int | None,
 ) -> ResultadoColeta:
     carga_id, modo, ultima_pagina = await _abrir_ou_retomar(engine, tabela, modo)
     try:
         if modo == "completa":
-            lidas = await _ler_tudo(engine, cliente, config, carga_id, tabela, ultima_pagina)
+            lidas, terminou = await _ler_tudo(
+                engine, cliente, config, carga_id, tabela, ultima_pagina, max_paginas
+            )
+            if not terminou:
+                return ResultadoColeta(
+                    carga_id,
+                    tabela,
+                    modo,
+                    "em_andamento",
+                    lidas,
+                    motivo=f"leu {lidas} páginas (limite desta execução); continua na próxima",
+                )
         else:
             lidas = await _ler_o_topo(engine, cliente, config, carga_id, tabela)
     except FonteIndisponivel as exc:
@@ -187,8 +212,12 @@ async def _ler_tudo(
     carga_id: int,
     tabela: str,
     ultima_pagina: int,
-) -> int:
-    """Lê da página seguinte ao checkpoint até a última. Devolve quantas leu."""
+    max_paginas: int | None,
+) -> tuple[int, bool]:
+    """Lê da página seguinte ao checkpoint até a última, ou até `max_paginas` nesta execução.
+
+    Devolve quantas leu e se chegou ao fim da tabela.
+    """
     lidas = 0
     numero = ultima_pagina + 1
     total_esperado = await _total_paginas_da_carga(engine, carga_id)
@@ -206,7 +235,9 @@ async def _ler_tudo(
         await _gravar_pagina(engine, config, carga_id, tabela, pagina)
         lidas += 1
         if numero >= pagina.total_paginas:
-            return lidas
+            return lidas, True
+        if max_paginas is not None and lidas >= max_paginas:
+            return lidas, False
         numero += 1
 
 
