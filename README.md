@@ -8,7 +8,7 @@ API de consulta às 65 tabelas TUSS da ANS com **histórico de versões** e **vi
 
 A ANS publica as tabelas TUSS, mas só o estado atual: não guarda histórico. A API oficial leva de 2 a 3 minutos por página de 25 itens, e os arquivos em lote das tabelas grandes ficam desatualizados. Este projeto coleta, valida e versiona esses dados para que uma consulta como "o código X estava vigente em 01/03/2026?" responda em milissegundos.
 
-A investigação da fonte está em [`docs/fonte-ans.md`](docs/fonte-ans.md) e as decisões em [`docs/adr/`](docs/adr/) (estratégia de coleta, carga inicial, vigência numa data). O desenho completo está em [`docs/PLANEJAMENTO.md`](docs/PLANEJAMENTO.md).
+A investigação da fonte está em [`docs/fonte-ans.md`](docs/fonte-ans.md) e as decisões em [`docs/adr/`](docs/adr/) (estratégia de coleta, carga inicial, vigência numa data) e os procedimentos de operação em [`docs/runbooks/`](docs/runbooks/). O desenho completo está em [`docs/PLANEJAMENTO.md`](docs/PLANEJAMENTO.md).
 
 ## Estado
 
@@ -16,7 +16,7 @@ A investigação da fonte está em [`docs/fonte-ans.md`](docs/fonte-ans.md) e as
 - [x] Fase 1: fundação (modelo de dados e importação de arquivos)
 - [x] Fase 2: API de leitura
 - [x] Fase 3: histórico, vigência e feed de mudanças
-- [ ] Fase 4: atualização automática
+- [ ] Fase 4: atualização automática (worker diário no ar; falta a prova de 7 dias sincronizando sozinho)
 - [ ] Fase 5: produção
 
 ## A API
@@ -56,6 +56,21 @@ Exemplo real (`GET /v1/tabelas/22/conceitos/10101012?em=2026-03-01`):
 
 A busca (`q`) aceita código ou começo de código (`1010`, `1.01.01.01-2`) e texto sem acento, tolerando erro de digitação: `consluta` encontra "Consulta em consultório".
 
+## Como os dados se mantêm atualizados
+
+A API nunca consulta a ANS na hora de responder: responde da última carga publicada e informa quando ela foi sincronizada (`sincronizado_em`). Quem busca os dados é um **worker**, que roda todo dia às 3 h (horário de Brasília):
+
+- **Tabelas pequenas** (a maioria das 65): lidas inteiras todo dia.
+- **Tabelas médias** (até ~2 mil páginas, como Medicamentos): todo dia só o começo da lista, onde a ANS coloca os códigos novos (comportamento medido em [`docs/ordem-da-fonte.md`](docs/ordem-da-fonte.md)); uma vez por mês, leitura completa, dividida em trechos de uma madrugada, para detectar alterações e remoções.
+- **Tabelas gigantes** (19 e 64, com 1,4 e 1,6 milhão de códigos): carga pelo arquivo do portal e, todo dia, o começo da lista. Se aparecer novidade, o worker avisa para conferir se há arquivo novo.
+
+Cada carga passa por validação, é comparada com a anterior e só então publicada, numa única transação: nada é apagado, a versão antiga é fechada e cada mudança vira um evento no feed. Duas proteções:
+
+- **Limite de anomalia:** uma carga que removeria mais de 2% dos códigos (ou faria a tabela encolher mais de 1%) não é publicada sozinha; fica retida até alguém conferir e aprovar pelo CLI ([runbook](docs/runbooks/carga-retida.md)). Remoção em massa quase sempre é problema na coleta, não decisão da ANS.
+- **Fonte instável:** a API da ANS leva de 1 a 3 minutos por página. Cada requisição tem limite de tempo e novas tentativas com espera crescente; uma leitura completa interrompida continua de onde parou no dia seguinte ([runbook](docs/runbooks/fonte-fora-do-ar.md)).
+
+Ao fim de cada ciclo, o worker avisa um serviço de heartbeat (healthchecks.io): se o aviso não chegar, chega um e-mail.
+
 ### Desempenho
 
 Teste de carga com k6 (`scripts/teste_de_carga.sh`), na VPS de desenvolvimento (4 GB, ARM64, compartilhada), com as tabelas 20 e 22 (49 mil conceitos), 30/09/2026:
@@ -84,6 +99,16 @@ uv run pytest -m "not integracao"             # só os rápidos, sem Docker
 uv run tuss inspecionar caminho/do/arquivo.zip # valida um arquivo baixado do portal da ANS
 scripts/teste_de_carga.sh                      # mede o desempenho contra as metas (k6)
 uv run tuss openapi > docs/openapi.json        # atualiza o contrato da API
+```
+
+Operação (na VPS, pelo CLI; não existe rota HTTP de administração):
+
+```bash
+docker compose run --rm tuss tuss catalogo           # atualiza a lista das 65 tabelas
+docker compose run --rm tuss tuss coletar 22         # coleta uma tabela agora (--completa: inteira)
+docker compose run --rm tuss tuss ciclo              # roda o ciclo do worker agora
+docker compose run --rm tuss tuss aprovar <carga>    # publica uma carga retida, depois de conferida
+docker compose run --rm tuss tuss descartar <carga>  # descarta uma carga retida
 ```
 
 ## Fonte dos dados
