@@ -8,6 +8,7 @@ e nunca chama a ANS. Sem nenhum token configurado, ela nem sobe.
 
 from __future__ import annotations
 
+import json
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -55,7 +56,9 @@ def criar_app(config: Config | None = None) -> FastAPI:
         lifespan=ciclo_de_vida,
     )
     app.state.hashes_tokens = hashes_tokens
-    limites.instalar(app)  # antes de erros: fica por dentro, e o log registra o 304/413 final
+    limites.instalar(
+        app, config.limite_consultas_por_minuto, config.limite_buscas_por_minuto
+    )  # antes de erros: fica por dentro, e o log registra o 304/413 final
     erros.instalar(app)
     app.include_router(rotas)
 
@@ -93,3 +96,9 @@ def _configurar_log() -> None:
         wrapper_class=structlog.make_filtering_bound_logger(logging.INFO),
         cache_logger_on_first_use=True,
     )
+
+
+def openapi_json() -> str:
+    """Contrato da API em JSON, para versionar em docs/openapi.json (não precisa de banco)."""
+    app = criar_app(Config(api_tokens_sha256="0" * 64))  # token fictício: só para montar o app
+    return json.dumps(app.openapi(), ensure_ascii=False, indent=2) + "\n"

@@ -21,8 +21,6 @@ from fastapi import FastAPI, HTTPException, Request, Response
 
 from tuss.api import erros
 
-LIMITE_CONSULTAS_POR_MINUTO = 60
-LIMITE_BUSCAS_POR_MINUTO = 20
 MAX_BYTES_CORPO = 64 * 1024
 CACHE_CONTROL = "private, max-age=60"  # dados só mudam quando uma carga é publicada
 
@@ -49,9 +47,8 @@ class Limitador:
 async def limitar(request: Request) -> None:
     """Dependência das rotas /v1, depois do token: conta por token e por tipo de chamada."""
     busca = "q" in request.query_params
-    tipo, limite = (
-        ("busca", LIMITE_BUSCAS_POR_MINUTO) if busca else ("consulta", LIMITE_CONSULTAS_POR_MINUTO)
-    )
+    limites: tuple[int, int] = request.app.state.limites_por_minuto  # (consultas, buscas)
+    tipo, limite = ("busca", limites[1]) if busca else ("consulta", limites[0])
     limitador: Limitador = request.app.state.limitador
     espera = limitador.registrar(f"{request.state.token_hash}:{tipo}", limite)
     if espera is not None:
@@ -62,8 +59,9 @@ async def limitar(request: Request) -> None:
         )
 
 
-def instalar(app: FastAPI) -> None:
+def instalar(app: FastAPI, consultas_por_minuto: int, buscas_por_minuto: int) -> None:
     app.state.limitador = Limitador()
+    app.state.limites_por_minuto = (consultas_por_minuto, buscas_por_minuto)
     app.middleware("http")(_cache_http)
     app.middleware("http")(_limitar_corpo)
 

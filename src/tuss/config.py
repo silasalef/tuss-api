@@ -37,6 +37,9 @@ class Config(BaseSettings):
     snapshots_dir: Path = Path("/var/lib/tuss/snapshots")
     # SHA-256 dos tokens aceitos pela API, separados por vírgula (gere com `tuss token`)
     api_tokens_sha256: str = ""
+    # Chamadas por minuto, por token. Só o teste de carga (numa cópia temporária da API) muda isto.
+    limite_consultas_por_minuto: int = 60
+    limite_buscas_por_minuto: int = 20
 
     def url_banco(self, papel: str) -> URL:
         """Endereço de conexão (driver asyncpg) para um dos três papéis."""

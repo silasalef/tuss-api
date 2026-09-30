@@ -1,0 +1,853 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "TUSS API",
+    "description": "\nConsulta às tabelas TUSS da ANS com histórico de versões e vigência por data.\n\nToda rota `/v1` exige `Authorization: Bearer <token>`. Erros seguem o formato\nProblem Details (RFC 9457) e trazem um `request_id` para rastrear no log.\n",
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/v1/status": {
+      "get": {
+        "summary": "Última sincronização de cada tabela",
+        "description": "Mostra, por tabela, a carga que a API está servindo e a tentativa de carga mais recente.\n\nÉ a forma de saber se os dados estão atualizados e se alguma carga falhou.",
+        "operationId": "status_v1_status_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Status"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/v1/tabelas": {
+      "get": {
+        "summary": "Tabelas carregadas",
+        "operationId": "listar_tabelas_v1_tabelas_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListaTabelas"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/v1/tabelas/{tabela}/conceitos": {
+      "get": {
+        "summary": "Conceitos de uma tabela, em ordem de código",
+        "description": "Sem `q`: todos, paginados por cursor (repita a chamada com `cursor=proximo_cursor`).\n\nCom `q`: busca, dos mais relevantes para os menos, até `limite` resultados.",
+        "operationId": "listar_conceitos_v1_tabelas__tabela__conceitos_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "tabela",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 20,
+              "description": "`tuss-22` ou só `22`",
+              "examples": [
+                "22"
+              ],
+              "title": "Tabela"
+            },
+            "description": "`tuss-22` ou só `22`"
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 100
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Busca. Código ou começo de código (`1010`, `1.01.01.01-2`) ou texto da descrição, sem precisar de acento e tolerando erro de digitação. Devolve os mais relevantes primeiro, até `limite`, sem próxima página.",
+              "examples": [
+                "consulta consultorio"
+              ],
+              "title": "Q"
+            },
+            "description": "Busca. Código ou começo de código (`1010`, `1.01.01.01-2`) ou texto da descrição, sem precisar de acento e tolerando erro de digitação. Devolve os mais relevantes primeiro, até `limite`, sem próxima página."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Valor de `proximo_cursor` da página anterior",
+              "title": "Cursor"
+            },
+            "description": "Valor de `proximo_cursor` da página anterior"
+          },
+          {
+            "name": "limite",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "description": "Itens por página",
+              "default": 50,
+              "title": "Limite"
+            },
+            "description": "Itens por página"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaginaConceitos"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Tabela ou código não encontrado"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/tabelas/{tabela}/conceitos/{codigo}": {
+      "get": {
+        "summary": "Um conceito pelo código (estado atual)",
+        "operationId": "consultar_conceito_v1_tabelas__tabela__conceitos__codigo__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "tabela",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 20,
+              "description": "`tuss-22` ou só `22`",
+              "examples": [
+                "22"
+              ],
+              "title": "Tabela"
+            },
+            "description": "`tuss-22` ou só `22`"
+          },
+          {
+            "name": "codigo",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 40,
+              "examples": [
+                "10101012"
+              ],
+              "title": "Codigo"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConceitoDetalhe"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Tabela ou código não encontrado"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health/live": {
+      "get": {
+        "tags": [
+          "saúde"
+        ],
+        "summary": "O processo está no ar",
+        "operationId": "vivo_health_live_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Saude"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health/ready": {
+      "get": {
+        "tags": [
+          "saúde"
+        ],
+        "summary": "O banco responde",
+        "operationId": "pronto_health_ready_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Saude"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Banco indisponível"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Conceito": {
+        "properties": {
+          "codigo": {
+            "type": "string",
+            "title": "Codigo",
+            "examples": [
+              "10101012"
+            ]
+          },
+          "descricao": {
+            "type": "string",
+            "title": "Descricao",
+            "examples": [
+              "Consulta em consultório (no horário normal ou preestabelecido)"
+            ]
+          },
+          "inicio_vigencia": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inicio Vigencia"
+          },
+          "fim_vigencia": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fim Vigencia",
+            "description": "Vazio = período aberto"
+          },
+          "fim_implantacao": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fim Implantacao"
+          },
+          "atributos": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Atributos",
+            "description": "Campos próprios de cada tabela (ex.: laboratorio na tuss-20)"
+          },
+          "criterio": {
+            "type": "string",
+            "enum": [
+              "oficial",
+              "observado"
+            ],
+            "title": "Criterio",
+            "description": "oficial: datas informadas pela ANS; observado: período visto nas cargas"
+          }
+        },
+        "type": "object",
+        "required": [
+          "codigo",
+          "descricao",
+          "inicio_vigencia",
+          "fim_vigencia",
+          "fim_implantacao",
+          "atributos",
+          "criterio"
+        ],
+        "title": "Conceito"
+      },
+      "ConceitoDetalhe": {
+        "properties": {
+          "codigo": {
+            "type": "string",
+            "title": "Codigo",
+            "examples": [
+              "10101012"
+            ]
+          },
+          "descricao": {
+            "type": "string",
+            "title": "Descricao",
+            "examples": [
+              "Consulta em consultório (no horário normal ou preestabelecido)"
+            ]
+          },
+          "inicio_vigencia": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inicio Vigencia"
+          },
+          "fim_vigencia": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fim Vigencia",
+            "description": "Vazio = período aberto"
+          },
+          "fim_implantacao": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fim Implantacao"
+          },
+          "atributos": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Atributos",
+            "description": "Campos próprios de cada tabela (ex.: laboratorio na tuss-20)"
+          },
+          "criterio": {
+            "type": "string",
+            "enum": [
+              "oficial",
+              "observado"
+            ],
+            "title": "Criterio",
+            "description": "oficial: datas informadas pela ANS; observado: período visto nas cargas"
+          },
+          "tabela": {
+            "type": "string",
+            "title": "Tabela",
+            "examples": [
+              "tuss-22"
+            ]
+          },
+          "carga_id": {
+            "type": "integer",
+            "title": "Carga Id",
+            "description": "Carga publicada de onde veio a resposta"
+          },
+          "sincronizado_em": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sincronizado Em",
+            "description": "Última vez que a fonte foi conferida"
+          }
+        },
+        "type": "object",
+        "required": [
+          "codigo",
+          "descricao",
+          "inicio_vigencia",
+          "fim_vigencia",
+          "fim_implantacao",
+          "atributos",
+          "criterio",
+          "tabela",
+          "carga_id",
+          "sincronizado_em"
+        ],
+        "title": "ConceitoDetalhe"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "ListaTabelas": {
+        "properties": {
+          "itens": {
+            "items": {
+              "$ref": "#/components/schemas/Tabela"
+            },
+            "type": "array",
+            "title": "Itens"
+          }
+        },
+        "type": "object",
+        "required": [
+          "itens"
+        ],
+        "title": "ListaTabelas"
+      },
+      "PaginaConceitos": {
+        "properties": {
+          "tabela": {
+            "type": "string",
+            "title": "Tabela"
+          },
+          "carga_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Carga Id"
+          },
+          "sincronizado_em": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sincronizado Em"
+          },
+          "itens": {
+            "items": {
+              "$ref": "#/components/schemas/Conceito"
+            },
+            "type": "array",
+            "title": "Itens"
+          },
+          "proximo_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Proximo Cursor",
+            "description": "Passe em `cursor` para a próxima página; vazio = acabou"
+          }
+        },
+        "type": "object",
+        "required": [
+          "tabela",
+          "carga_id",
+          "sincronizado_em",
+          "itens",
+          "proximo_cursor"
+        ],
+        "title": "PaginaConceitos"
+      },
+      "Saude": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "const": "ok",
+            "title": "Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "title": "Saude"
+      },
+      "Status": {
+        "properties": {
+          "tabelas": {
+            "items": {
+              "$ref": "#/components/schemas/StatusTabela"
+            },
+            "type": "array",
+            "title": "Tabelas"
+          }
+        },
+        "type": "object",
+        "required": [
+          "tabelas"
+        ],
+        "title": "Status"
+      },
+      "StatusTabela": {
+        "properties": {
+          "tabela": {
+            "type": "string",
+            "title": "Tabela",
+            "examples": [
+              "tuss-22"
+            ]
+          },
+          "descricao": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Descricao",
+            "description": "Vem do catálogo da ANS; vazia até a Fase 4"
+          },
+          "conceitos": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conceitos",
+            "description": "Conceitos publicados na carga atual"
+          },
+          "carga_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Carga Id",
+            "description": "Carga publicada que a API está servindo"
+          },
+          "sincronizado_em": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sincronizado Em",
+            "description": "Última vez que a fonte foi conferida"
+          },
+          "ultima_carga": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UltimaCarga"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Tentativa mais recente, com qualquer status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "tabela",
+          "descricao",
+          "conceitos",
+          "carga_id",
+          "sincronizado_em",
+          "ultima_carga"
+        ],
+        "title": "StatusTabela"
+      },
+      "Tabela": {
+        "properties": {
+          "tabela": {
+            "type": "string",
+            "title": "Tabela",
+            "examples": [
+              "tuss-22"
+            ]
+          },
+          "numero": {
+            "type": "string",
+            "title": "Numero",
+            "examples": [
+              "22"
+            ]
+          },
+          "descricao": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Descricao",
+            "description": "Vem do catálogo da ANS; vazia até a Fase 4"
+          },
+          "conceitos": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conceitos",
+            "description": "Conceitos publicados na carga atual"
+          },
+          "carga_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Carga Id"
+          },
+          "sincronizado_em": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sincronizado Em"
+          }
+        },
+        "type": "object",
+        "required": [
+          "tabela",
+          "numero",
+          "descricao",
+          "conceitos",
+          "carga_id",
+          "sincronizado_em"
+        ],
+        "title": "Tabela"
+      },
+      "UltimaCarga": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "em_andamento",
+              "retida",
+              "publicada",
+              "sem_mudanca",
+              "falhou"
+            ],
+            "title": "Status"
+          },
+          "iniciada_em": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Iniciada Em"
+          },
+          "finalizada_em": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finalizada Em"
+          },
+          "erro": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Erro",
+            "description": "Motivo, quando a carga falhou"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "status",
+          "iniciada_em",
+          "finalizada_em",
+          "erro"
+        ],
+        "title": "UltimaCarga"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      }
+    },
+    "securitySchemes": {
+      "HTTPBearer": {
+        "type": "http",
+        "description": "Token gerado com `tuss token`",
+        "scheme": "bearer"
+      }
+    }
+  }
+}

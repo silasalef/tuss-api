@@ -6,17 +6,15 @@ import httpx
 import pytest
 from conftest import BancoDeTeste, auth
 
-from tuss.api.limites import (
-    CACHE_CONTROL,
-    LIMITE_BUSCAS_POR_MINUTO,
-    LIMITE_CONSULTAS_POR_MINUTO,
-    MAX_BYTES_CORPO,
-)
+from tuss.api.limites import CACHE_CONTROL, MAX_BYTES_CORPO
+from tuss.config import Config
 from tuss.ingestion.importacao import importar
 from tuss.ingestion.lote import ler_lote
 
 FIXTURES = Path(__file__).parents[1] / "fixtures" / "ans"
 PROBLEMA = "application/problem+json"
+LIMITE_CONSULTAS_POR_MINUTO = Config().limite_consultas_por_minuto
+LIMITE_BUSCAS_POR_MINUTO = Config().limite_buscas_por_minuto
 
 
 @pytest.fixture

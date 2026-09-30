@@ -81,6 +81,14 @@ def token() -> None:
     typer.echo(f"Hash para TUSS_API_TOKENS_SHA256:          {hash_token(novo)}")
 
 
+@app.command()
+def openapi() -> None:
+    """Imprime o contrato da API (OpenAPI). Atualizar: tuss openapi > docs/openapi.json"""
+    from tuss.api.app import openapi_json  # só carrega a API quando este comando é usado
+
+    typer.echo(openapi_json(), nl=False)
+
+
 def _ler(caminho: Path) -> Lote:
     try:
         return ler_lote(caminho)
