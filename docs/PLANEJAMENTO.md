@@ -134,7 +134,7 @@ A API é privada, então os limites não existem para barrar o público: protege
 | Corpo de requisição | máx. 64 KB |
 | Tempo de consulta no banco | `statement_timeout` de 2 s no papel da API |
 
-- Rate limit em memória no processo da API (slowapi), com a API rodando em um processo só. Se um dia precisar de mais processos, o contador passa para o Redis; até lá, é uma peça a menos.
+- Rate limit em memória no processo da API (limitador próprio em `api/limites.py`, janela deslizante de 60 s por token e por tipo de chamada), com a API rodando em um processo só. A slowapi foi descartada na Fase 2: ela limita por rota, e busca e listagem são a mesma rota (muda só o `q`). Se um dia precisar de mais processos, o contador passa para o Redis; até lá, é uma peça a menos.
 - Excedeu: 429 com `Retry-After`.
 - Metas: consulta por código p95 < 150 ms; busca p95 < 400 ms. Medidas com um teste de carga (k6) antes do deploy e na Fase 4.
 - Busca no próprio Postgres, sem Elasticsearch: tsvector `portuguese` + `unaccent` (via wrapper `IMMUTABLE`), `pg_trgm` para erro de digitação e `text_pattern_ops` para prefixo de código. Ranking: código exato, prefixo, full-text, trigrama.
@@ -187,7 +187,7 @@ CI no GitHub Actions: ruff, mypy, testes, gitleaks e pip-audit; merge só com tu
 | API | FastAPI + Pydantic v2 | Validação e OpenAPI sem esforço extra |
 | Banco | PostgreSQL 17+ com `pg_trgm`, `unaccent`, `btree_gist` | Busca, temporalidade e integridade no mesmo lugar |
 | Acesso a dados | SQLAlchemy 2 (async) + asyncpg, Alembic | Migrations versionadas |
-| Rate limit | slowapi (em memória) | Sem Redis enquanto houver um processo |
+| Rate limit | Limitador próprio em memória (~30 linhas) | Limite diferente para busca e consulta na mesma rota; sem Redis enquanto houver um processo |
 | Cliente HTTP da fonte | httpx + tenacity | Timeout, retry com backoff e jitter |
 | Agenda do worker | APScheduler | Sem broker nem fila extra |
 | CLI | Typer | Importar, aprovar e reprocessar à mão |

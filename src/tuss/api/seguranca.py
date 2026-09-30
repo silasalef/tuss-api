@@ -7,7 +7,7 @@ from typing import Annotated
 from fastapi import Depends, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-from tuss.api.token import token_valido
+from tuss.api.token import hash_token, token_valido
 
 # auto_error=False: a resposta 401 sai no nosso formato (Problem Details), não no padrão do FastAPI.
 _bearer = HTTPBearer(auto_error=False, description="Token gerado com `tuss token`")
@@ -25,3 +25,4 @@ async def exigir_token(
             detail="token ausente ou inválido",
             headers={"WWW-Authenticate": "Bearer"},
         )
+    request.state.token_hash = hash_token(credenciais.credentials)  # chave dos limites por token

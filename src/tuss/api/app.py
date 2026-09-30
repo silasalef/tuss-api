@@ -17,7 +17,7 @@ from fastapi import FastAPI, HTTPException, Request
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from tuss.api import erros
+from tuss.api import erros, limites
 from tuss.api.schemas import Saude
 from tuss.api.v1 import rotas
 from tuss.config import PAPEL_API, Config
@@ -55,6 +55,7 @@ def criar_app(config: Config | None = None) -> FastAPI:
         lifespan=ciclo_de_vida,
     )
     app.state.hashes_tokens = hashes_tokens
+    limites.instalar(app)  # antes de erros: fica por dentro, e o log registra o 304/413 final
     erros.instalar(app)
     app.include_router(rotas)
 

@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 
 from tuss.api import cursor
 from tuss.api.dependencias import conexao
+from tuss.api.limites import limitar
 from tuss.api.schemas import (
     Conceito,
     ConceitoDetalhe,
@@ -26,7 +27,8 @@ from tuss.api.seguranca import exigir_token
 from tuss.db import consultas
 from tuss.domain.vigencia import criterio
 
-rotas = APIRouter(prefix="/v1", dependencies=[Depends(exigir_token)])
+# Ordem importa: primeiro o token (sabe quem é), depois o limite (conta por token).
+rotas = APIRouter(prefix="/v1", dependencies=[Depends(exigir_token), Depends(limitar)])
 
 Conexao = Annotated[AsyncConnection, Depends(conexao)]
 CodigoTabela = Annotated[
