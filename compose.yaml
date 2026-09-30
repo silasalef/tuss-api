@@ -1,0 +1,52 @@
+# Serviços do tuss-api. Por enquanto só o banco; a API e o worker entram nas próximas fases.
+#
+# Uso:
+#   cp .env.example .env   # e troque a senha
+#   docker compose up -d
+#   docker compose exec postgres psql -U tuss   # abrir o banco
+#
+# Regras (ver docs/PLANEJAMENTO.md):
+# - nenhuma porta publicada: o banco só é alcançável pelos containers deste projeto;
+# - limite de memória, para uma importação pesada não afetar outros serviços do servidor.
+
+name: tuss-api
+
+services:
+  postgres:
+    image: postgres:18-alpine # tem versão arm64; traz pg_trgm, unaccent e btree_gist
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: tuss
+      POSTGRES_USER: tuss # dono do banco: usado só nas migrations
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}
+    # Ajustes para um servidor pequeno e compartilhado (o padrão do Postgres supõe máquina dedicada)
+    command:
+      - postgres
+      - -c
+      - shared_buffers=128MB
+      - -c
+      - effective_cache_size=384MB
+      - -c
+      - work_mem=8MB
+      - -c
+      - maintenance_work_mem=64MB
+      - -c
+      - max_connections=30
+    volumes:
+      - pgdata:/var/lib/postgresql # a partir do Postgres 18 o volume é montado aqui, não em .../data
+    mem_limit: 512m
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tuss -d tuss"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m # evita que o log encha o disco
+        max-file: "3"
+
+volumes:
+  pgdata:

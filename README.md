@@ -21,10 +21,12 @@ A investigação da fonte está em [`docs/fonte-ans.md`](docs/fonte-ans.md) e a 
 
 ## Rodando localmente
 
-Requer [uv](https://docs.astral.sh/uv/).
+Requer [uv](https://docs.astral.sh/uv/) e Docker.
 
 ```bash
 uv sync
+cp .env.example .env                           # e troque a senha
+docker compose up -d                           # sobe o PostgreSQL (sem porta publicada)
 uv run pytest                                  # testes
 uv run tuss inspecionar caminho/do/arquivo.zip # valida um arquivo baixado do portal da ANS
 ```
