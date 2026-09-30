@@ -88,7 +88,7 @@ async def status(con: Conexao) -> Status:
     )
 
 
-@rotas.get("/tabelas", summary="Tabelas carregadas")
+@rotas.get("/tabelas", summary="Tabelas do catálogo (conceitos vazio = ainda não carregada)")
 async def listar_tabelas(con: Conexao) -> ListaTabelas:
     linhas = await consultas.listar_tabelas(con)
     return ListaTabelas(

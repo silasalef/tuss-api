@@ -30,8 +30,10 @@ class UltimaCarga(BaseModel):
 
 class StatusTabela(BaseModel):
     tabela: str = Field(examples=["tuss-22"])
-    descricao: str | None = Field(description="Vem do catálogo da ANS; vazia até a Fase 4")
-    conceitos: int | None = Field(description="Conceitos publicados na carga atual")
+    descricao: str | None = Field(description="Nome da tabela no catálogo da ANS (`tuss catalogo`)")
+    conceitos: int | None = Field(
+        description="Conceitos publicados na carga atual; vazio = sem carga"
+    )
     carga_id: int | None = Field(description="Carga publicada que a API está servindo")
     sincronizado_em: datetime | None = Field(description="Última vez que a fonte foi conferida")
     ultima_carga: UltimaCarga | None = Field(
@@ -50,8 +52,10 @@ class Saude(BaseModel):
 class Tabela(BaseModel):
     tabela: str = Field(examples=["tuss-22"])
     numero: str = Field(examples=["22"])
-    descricao: str | None = Field(description="Vem do catálogo da ANS; vazia até a Fase 4")
-    conceitos: int | None = Field(description="Conceitos publicados na carga atual")
+    descricao: str | None = Field(description="Nome da tabela no catálogo da ANS (`tuss catalogo`)")
+    conceitos: int | None = Field(
+        description="Conceitos publicados na carga atual; vazio = sem carga"
+    )
     carga_id: int | None
     sincronizado_em: datetime | None
 

@@ -32,7 +32,7 @@
     },
     "/v1/tabelas": {
       "get": {
-        "summary": "Tabelas carregadas",
+        "summary": "Tabelas do catálogo (conceitos vazio = ainda não carregada)",
         "operationId": "listar_tabelas_v1_tabelas_get",
         "responses": {
           "200": {
@@ -1352,7 +1352,7 @@
               }
             ],
             "title": "Descricao",
-            "description": "Vem do catálogo da ANS; vazia até a Fase 4"
+            "description": "Nome da tabela no catálogo da ANS (`tuss catalogo`)"
           },
           "conceitos": {
             "anyOf": [
@@ -1364,7 +1364,7 @@
               }
             ],
             "title": "Conceitos",
-            "description": "Conceitos publicados na carga atual"
+            "description": "Conceitos publicados na carga atual; vazio = sem carga"
           },
           "carga_id": {
             "anyOf": [
@@ -1440,7 +1440,7 @@
               }
             ],
             "title": "Descricao",
-            "description": "Vem do catálogo da ANS; vazia até a Fase 4"
+            "description": "Nome da tabela no catálogo da ANS (`tuss catalogo`)"
           },
           "conceitos": {
             "anyOf": [
@@ -1452,7 +1452,7 @@
               }
             ],
             "title": "Conceitos",
-            "description": "Conceitos publicados na carga atual"
+            "description": "Conceitos publicados na carga atual; vazio = sem carga"
           },
           "carga_id": {
             "anyOf": [

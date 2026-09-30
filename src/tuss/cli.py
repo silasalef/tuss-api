@@ -11,6 +11,8 @@ import typer
 from tuss.api.token import gerar_token, hash_token
 from tuss.config import Config
 from tuss.ingestion import arquivo
+from tuss.ingestion.catalogo import sincronizar_catalogo
+from tuss.ingestion.fonte import ClienteANS, FonteIndisponivel, RespostaInvalida
 from tuss.ingestion.importacao import ImportacaoRecusada, importar
 from tuss.ingestion.lote import Lote, ler_lote
 
@@ -67,6 +69,23 @@ def importar_arquivo(caminho: ArquivoDoPortal) -> None:
         typer.echo(f"Reativados:  {resultado.reativados}")
     if resultado.snapshot is not None:
         typer.echo(f"Snapshot:    {resultado.snapshot}")
+
+
+@app.command()
+def catalogo() -> None:
+    """Atualiza o nome e o total de cada tabela a partir do catálogo da ANS."""
+
+    async def _rodar() -> tuple[int, int]:
+        async with ClienteANS() as ans:
+            itens = await ans.catalogo()
+        return len(itens), await sincronizar_catalogo(itens, Config())
+
+    try:
+        total, novas = asyncio.run(_rodar())
+    except (FonteIndisponivel, RespostaInvalida) as exc:
+        typer.echo(f"Catálogo não atualizado: {exc}", err=True)
+        raise typer.Exit(1) from exc
+    typer.echo(f"Catálogo: {total} tabelas ({novas} novas).")
 
 
 @app.command()
