@@ -6,6 +6,7 @@ mensagem clara em vez de tentar conectar sem senha.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from pydantic import SecretStr
@@ -34,6 +35,8 @@ class Config(BaseSettings):
     db_senha_api: SecretStr | None = None
     # Cópia de cada arquivo importado, como veio da ANS (volume `snapshots` no compose.yaml)
     snapshots_dir: Path = Path("/var/lib/tuss/snapshots")
+    # SHA-256 dos tokens aceitos pela API, separados por vírgula (gere com `tuss token`)
+    api_tokens_sha256: str = ""
 
     def url_banco(self, papel: str) -> URL:
         """Endereço de conexão (driver asyncpg) para um dos três papéis."""
@@ -58,3 +61,20 @@ class Config(BaseSettings):
         if valor is None:
             raise ConfigAusente(f"defina TUSS_DB_SENHA_{papel.upper()}")
         return valor.get_secret_value()
+
+    def hashes_tokens(self) -> frozenset[str]:
+        """Hashes aceitos pela API. Sem nenhum, a API não sobe (falha fechada)."""
+        hashes = frozenset(
+            h.strip().lower() for h in self.api_tokens_sha256.split(",") if h.strip()
+        )
+        if not hashes:
+            raise ConfigAusente("defina TUSS_API_TOKENS_SHA256 (gere com: tuss token)")
+        invalidos = [h for h in hashes if not _RE_SHA256.match(h)]
+        if invalidos:
+            raise ConfigAusente(
+                f"TUSS_API_TOKENS_SHA256 tem {len(invalidos)} valor(es) que não são SHA-256"
+            )
+        return hashes
+
+
+_RE_SHA256 = re.compile(r"^[0-9a-f]{64}$")

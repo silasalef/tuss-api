@@ -8,6 +8,7 @@ from typing import Annotated
 
 import typer
 
+from tuss.api.token import gerar_token, hash_token
 from tuss.config import Config
 from tuss.ingestion import arquivo
 from tuss.ingestion.importacao import ImportacaoRecusada, importar
@@ -66,6 +67,18 @@ def importar_arquivo(caminho: ArquivoDoPortal) -> None:
             f" {resultado.incluidos} conceitos."
         )
         typer.echo(f"Snapshot:    {resultado.snapshot}")
+
+
+@app.command()
+def token() -> None:
+    """Gera um token de acesso à API (um por dispositivo).
+
+    O token aparece só agora: a API guarda apenas o hash. Para ativar, acrescente o
+    hash em TUSS_API_TOKENS_SHA256 no .env (separado por vírgula) e reinicie a API.
+    """
+    novo = gerar_token()
+    typer.echo(f"Token (guarde agora, não aparece de novo): {novo}")
+    typer.echo(f"Hash para TUSS_API_TOKENS_SHA256:          {hash_token(novo)}")
 
 
 def _ler(caminho: Path) -> Lote:

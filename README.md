@@ -26,12 +26,14 @@ Requer [uv](https://docs.astral.sh/uv/) e Docker.
 ```bash
 uv sync
 cp .env.example .env                           # e troque as senhas
-docker compose up -d                           # sobe o PostgreSQL (sem porta publicada)
-docker compose run --rm --build tuss alembic upgrade head  # cria as tabelas
+uv run tuss token                              # gera um token; o hash vai em TUSS_API_TOKENS_SHA256 no .env
+docker compose run --rm --build tuss alembic upgrade head  # sobe o PostgreSQL e cria as tabelas
+docker compose run --rm tuss tuss importar /dados/arquivo.json  # importa (arquivo em ./dados)
+docker compose up -d --build                   # sobe a API em 127.0.0.1:8100 (documentação em /docs)
+
 uv run pytest                                  # todos os testes (os de integração sobem um Postgres temporário)
 uv run pytest -m "not integracao"             # só os rápidos, sem Docker
 uv run tuss inspecionar caminho/do/arquivo.zip # valida um arquivo baixado do portal da ANS
-docker compose run --rm tuss tuss importar /dados/arquivo.json  # importa (arquivo em ./dados)
 ```
 
 ## Fonte dos dados

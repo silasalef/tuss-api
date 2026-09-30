@@ -1,15 +1,15 @@
-# Serviços do tuss-api. Por enquanto o banco e o CLI; a API e o worker entram nas próximas fases.
+# Serviços do tuss-api: banco, API e CLI. O worker entra na Fase 4.
 #
 # Uso:
 #   cp .env.example .env   # e troque as senhas
-#   docker compose up -d                                  # sobe o banco
+#   docker compose up -d --build                          # sobe o banco e a API
 #   docker compose run --rm --build tuss alembic upgrade head   # aplica as migrations
 #   docker compose run --rm tuss tuss importar /dados/arquivo.json  # arquivo em ./dados
 #   docker compose run --rm tuss tuss --help              # qualquer comando do CLI
 #   docker compose exec postgres psql -U tuss             # abrir o banco
 #
 # Regras (ver docs/PLANEJAMENTO.md):
-# - nenhuma porta publicada: o banco só é alcançável pelos containers deste projeto;
+# - o banco não publica porta; a API só em 127.0.0.1 (acesso por túnel SSH);
 # - limite de memória, para uma importação pesada não afetar outros serviços do servidor.
 
 name: tuss-api
@@ -49,6 +49,45 @@ services:
       driver: json-file
       options:
         max-size: 10m # evita que o log encha o disco
+        max-file: "3"
+
+  # API de leitura. Só em 127.0.0.1 da VPS: de fora, apenas por túnel SSH
+  # (ssh -L 8100:localhost:8100 ...). Conecta com o papel `api`, que só lê.
+  api:
+    build: .
+    image: tuss-api:local
+    restart: unless-stopped
+    command:
+      - uvicorn
+      - tuss.api.app:criar_app
+      - --factory
+      - --host=0.0.0.0 # dentro do container; a porta publicada abaixo é só local
+      - --port=8000
+      - --no-server-header
+      - --no-access-log # a própria API registra cada requisição (JSON, com request_id)
+    environment:
+      TUSS_DB_SENHA_API: ${TUSS_DB_SENHA_API:?defina TUSS_DB_SENHA_API no .env}
+      TUSS_API_TOKENS_SHA256: ${TUSS_API_TOKENS_SHA256:?defina TUSS_API_TOKENS_SHA256 no .env (gere com tuss token)}
+    ports:
+      - "127.0.0.1:8100:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    mem_limit: 256m
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
         max-file: "3"
 
   # CLI e migrations. Não sobe com `up`: só roda quando chamado com `docker compose run`.
