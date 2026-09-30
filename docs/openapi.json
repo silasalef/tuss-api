@@ -103,6 +103,25 @@
             "description": "Busca. Código ou começo de código (`1010`, `1.01.01.01-2`) ou texto da descrição, sem precisar de acento e tolerando erro de digitação. Devolve os mais relevantes primeiro, até `limite`, sem próxima página."
           },
           {
+            "name": "vigente_em",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Só os conceitos vigentes nesta data (AAAA-MM-DD), cada um como era nela. Não se combina com `q`.",
+              "title": "Vigente Em"
+            },
+            "description": "Só os conceitos vigentes nesta data (AAAA-MM-DD), cada um como era nela. Não se combina com `q`."
+          },
+          {
             "name": "cursor",
             "in": "query",
             "required": false,
@@ -164,8 +183,95 @@
     },
     "/v1/tabelas/{tabela}/conceitos/{codigo}": {
       "get": {
-        "summary": "Um conceito pelo código (estado atual)",
+        "summary": "Um conceito pelo código (estado atual ou numa data)",
+        "description": "Sem `em`: a versão atual, e se está vigente hoje. Com `em`: a versão que valia na data.\n\nVigência usa as datas da ANS (`criterio: oficial`); sem elas, o período em que o\ncódigo apareceu nas cargas (`criterio: observado`). Antes da primeira carga, a\nversão mais antiga que conhecemos.",
         "operationId": "consultar_conceito_v1_tabelas__tabela__conceitos__codigo__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "tabela",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 20,
+              "description": "`tuss-22` ou só `22`",
+              "examples": [
+                "22"
+              ],
+              "title": "Tabela"
+            },
+            "description": "`tuss-22` ou só `22`"
+          },
+          {
+            "name": "codigo",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 40,
+              "examples": [
+                "10101012"
+              ],
+              "title": "Codigo"
+            }
+          },
+          {
+            "name": "em",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Data (AAAA-MM-DD): devolve o código como era nesse dia e se estava vigente. 404 se nesse dia o código estava fora da lista.",
+              "title": "Em"
+            },
+            "description": "Data (AAAA-MM-DD): devolve o código como era nesse dia e se estava vigente. 404 se nesse dia o código estava fora da lista."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConceitoDetalhe"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Tabela ou código não encontrado"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/tabelas/{tabela}/conceitos/{codigo}/historico": {
+      "get": {
+        "summary": "Todas as versões de um código",
+        "description": "Cada estado que o código já teve na nossa base, com o período em que valeu.\n\nInclui códigos que saíram da lista (a última versão tem `publicado_ate`).",
+        "operationId": "historico_v1_tabelas__tabela__conceitos__codigo__historico_get",
         "security": [
           {
             "HTTPBearer": []
@@ -207,7 +313,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ConceitoDetalhe"
+                  "$ref": "#/components/schemas/Historico"
                 }
               }
             }
@@ -453,6 +559,17 @@
             ],
             "title": "Sincronizado Em",
             "description": "Última vez que a fonte foi conferida"
+          },
+          "em": {
+            "type": "string",
+            "format": "date",
+            "title": "Em",
+            "description": "Data consultada: a de `?em=` ou, sem ela, hoje (UTC)"
+          },
+          "vigente": {
+            "type": "boolean",
+            "title": "Vigente",
+            "description": "Se o código estava vigente na data consultada"
           }
         },
         "type": "object",
@@ -466,7 +583,9 @@
           "criterio",
           "tabela",
           "carga_id",
-          "sincronizado_em"
+          "sincronizado_em",
+          "em",
+          "vigente"
         ],
         "title": "ConceitoDetalhe"
       },
@@ -482,6 +601,58 @@
         },
         "type": "object",
         "title": "HTTPValidationError"
+      },
+      "Historico": {
+        "properties": {
+          "tabela": {
+            "type": "string",
+            "title": "Tabela",
+            "examples": [
+              "tuss-22"
+            ]
+          },
+          "codigo": {
+            "type": "string",
+            "title": "Codigo",
+            "examples": [
+              "10101012"
+            ]
+          },
+          "carga_id": {
+            "type": "integer",
+            "title": "Carga Id",
+            "description": "Carga publicada que a API está servindo"
+          },
+          "sincronizado_em": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sincronizado Em"
+          },
+          "versoes": {
+            "items": {
+              "$ref": "#/components/schemas/Versao"
+            },
+            "type": "array",
+            "title": "Versoes",
+            "description": "Da mais antiga para a mais nova"
+          }
+        },
+        "type": "object",
+        "required": [
+          "tabela",
+          "codigo",
+          "carga_id",
+          "sincronizado_em",
+          "versoes"
+        ],
+        "title": "Historico"
       },
       "ListaTabelas": {
         "properties": {
@@ -840,6 +1011,103 @@
           "type"
         ],
         "title": "ValidationError"
+      },
+      "Versao": {
+        "properties": {
+          "descricao": {
+            "type": "string",
+            "title": "Descricao"
+          },
+          "inicio_vigencia": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inicio Vigencia"
+          },
+          "fim_vigencia": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fim Vigencia",
+            "description": "Vazio = período aberto"
+          },
+          "fim_implantacao": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fim Implantacao"
+          },
+          "atributos": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Atributos"
+          },
+          "criterio": {
+            "type": "string",
+            "enum": [
+              "oficial",
+              "observado"
+            ],
+            "title": "Criterio"
+          },
+          "carga_id": {
+            "type": "integer",
+            "title": "Carga Id",
+            "description": "Carga que publicou esta versão"
+          },
+          "publicado_de": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Publicado De",
+            "description": "Quando esta versão entrou na nossa base"
+          },
+          "publicado_ate": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Publicado Ate",
+            "description": "Quando foi substituída ou o código saiu da lista; vazio = versão atual"
+          }
+        },
+        "type": "object",
+        "required": [
+          "descricao",
+          "inicio_vigencia",
+          "fim_vigencia",
+          "fim_implantacao",
+          "atributos",
+          "criterio",
+          "carga_id",
+          "publicado_de",
+          "publicado_ate"
+        ],
+        "title": "Versao"
       }
     },
     "securitySchemes": {

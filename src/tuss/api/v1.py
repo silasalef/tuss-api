@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from datetime import UTC, date, datetime
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
@@ -15,6 +16,7 @@ from tuss.api.limites import limitar
 from tuss.api.schemas import (
     Conceito,
     ConceitoDetalhe,
+    Historico,
     ListaTabelas,
     PaginaConceitos,
     ParametrosLista,
@@ -22,10 +24,11 @@ from tuss.api.schemas import (
     StatusTabela,
     Tabela,
     UltimaCarga,
+    Versao,
 )
 from tuss.api.seguranca import exigir_token
 from tuss.db import consultas
-from tuss.domain.vigencia import criterio
+from tuss.domain.vigencia import criterio, situacao, versao_em
 
 # Ordem importa: primeiro o token (sabe quem é), depois o limite (conta por token).
 rotas = APIRouter(prefix="/v1", dependencies=[Depends(exigir_token), Depends(limitar)])
@@ -105,10 +108,17 @@ async def listar_conceitos(
     """
     t = await _tabela(con, tabela)
     if params.q is not None:
+        if params.vigente_em is not None:
+            raise HTTPException(400, "vigente_em não se combina com q; use um dos dois")
         return await _buscar(con, t, params.q, params.cursor, params.limite)
     apos = cursor.decodificar(params.cursor) if params.cursor else None
     # Pede um a mais só para saber se existe próxima página.
-    linhas = await consultas.listar_conceitos(con, t.id, apos, params.limite + 1)
+    if params.vigente_em is None:
+        linhas = await consultas.listar_conceitos(con, t.id, apos, params.limite + 1)
+    else:
+        linhas = await consultas.listar_vigentes(
+            con, t.id, params.vigente_em, apos, params.limite + 1
+        )
     tem_mais = len(linhas) > params.limite
     itens = [_conceito(linha) for linha in linhas[: params.limite]]
     return PaginaConceitos(
@@ -122,21 +132,84 @@ async def listar_conceitos(
 
 @rotas.get(
     "/tabelas/{tabela}/conceitos/{codigo}",
-    summary="Um conceito pelo código (estado atual)",
+    summary="Um conceito pelo código (estado atual ou numa data)",
     responses=_NAO_ENCONTRADA,
 )
 async def consultar_conceito(
-    tabela: CodigoTabela, codigo: CodigoConceito, con: Conexao
+    tabela: CodigoTabela,
+    codigo: CodigoConceito,
+    con: Conexao,
+    em: Annotated[
+        date | None,
+        Query(
+            description=(
+                "Data (AAAA-MM-DD): devolve o código como era nesse dia e se estava vigente."
+                " 404 se nesse dia o código estava fora da lista."
+            )
+        ),
+    ] = None,
 ) -> ConceitoDetalhe:
+    """Sem `em`: a versão atual, e se está vigente hoje. Com `em`: a versão que valia na data.
+
+    Vigência usa as datas da ANS (`criterio: oficial`); sem elas, o período em que o
+    código apareceu nas cargas (`criterio: observado`). Antes da primeira carga, a
+    versão mais antiga que conhecemos.
+    """
     t = await _tabela(con, tabela)
-    linha = await consultas.conceito(con, t.id, codigo)
-    if linha is None:
-        raise HTTPException(404, f"código {codigo} não encontrado em {t.codigo}")
+    if em is None:
+        # Estado atual: só a versão atual importa, e a consulta usa o índice dela.
+        em = datetime.now(UTC).date()
+        linha = await consultas.conceito(con, t.id, codigo)
+        versoes = [] if linha is None else [linha]
+    else:
+        versoes = await consultas.versoes(con, t.id, codigo)
+    versao = versao_em(versoes, em)
+    if versao is None:
+        detalhe = "não encontrado" if not versoes else f"fora da lista em {em:%d/%m/%Y}"
+        raise HTTPException(404, f"código {codigo} {detalhe} em {t.codigo}")
     return ConceitoDetalhe(
-        **_conceito(linha).model_dump(),
+        **_conceito(versao).model_dump(),
         tabela=t.codigo,
         carga_id=t.carga_atual_id,
         sincronizado_em=t.ultima_sync_em,
+        em=em,
+        vigente=situacao(versoes, em).vigente,
+    )
+
+
+@rotas.get(
+    "/tabelas/{tabela}/conceitos/{codigo}/historico",
+    summary="Todas as versões de um código",
+    responses=_NAO_ENCONTRADA,
+)
+async def historico(tabela: CodigoTabela, codigo: CodigoConceito, con: Conexao) -> Historico:
+    """Cada estado que o código já teve na nossa base, com o período em que valeu.
+
+    Inclui códigos que saíram da lista (a última versão tem `publicado_ate`).
+    """
+    t = await _tabela(con, tabela)
+    linhas = await consultas.versoes(con, t.id, codigo)
+    if not linhas:
+        raise HTTPException(404, f"código {codigo} não encontrado em {t.codigo}")
+    return Historico(
+        tabela=t.codigo,
+        codigo=codigo,
+        carga_id=t.carga_atual_id,
+        sincronizado_em=t.ultima_sync_em,
+        versoes=[
+            Versao(
+                descricao=linha.descricao,
+                inicio_vigencia=linha.inicio_vigencia,
+                fim_vigencia=linha.fim_vigencia,
+                fim_implantacao=linha.fim_implantacao,
+                atributos=linha.atributos,
+                criterio=criterio(linha.inicio_vigencia),
+                carga_id=linha.carga_id,
+                publicado_de=linha.publicado_de,
+                publicado_ate=linha.publicado_ate,
+            )
+            for linha in linhas
+        ],
     )
 
 

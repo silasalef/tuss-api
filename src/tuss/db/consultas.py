@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import date
 from typing import Any
 
 from sqlalchemy import Row, text
@@ -34,7 +35,8 @@ async def status_das_tabelas(con: AsyncConnection) -> list[Row[Any]]:
 
 
 _COLUNAS_CONCEITO = """
-    c.codigo, v.descricao, v.inicio_vigencia, v.fim_vigencia, v.fim_implantacao, v.atributos
+    c.codigo, v.descricao, v.inicio_vigencia, v.fim_vigencia, v.fim_implantacao, v.atributos,
+    v.publicado_de, v.publicado_ate
     FROM conceito c
     JOIN conceito_versao v ON v.conceito_id = c.id AND v.publicado_ate IS NULL
 """
@@ -98,6 +100,70 @@ async def conceito(con: AsyncConnection, tabela_id: int, codigo: str) -> Row[Any
         {"tabela": tabela_id, "codigo": codigo},
     )
     return resultado.one_or_none()
+
+
+async def versoes(con: AsyncConnection, tabela_id: int, codigo: str) -> list[Row[Any]]:
+    """Todas as versões de um código, da mais antiga para a mais nova (vazio = nunca existiu).
+
+    Inclui as fechadas: é o histórico, e também o que responde "como era em tal data".
+    """
+    resultado = await con.execute(
+        text("""
+        SELECT c.codigo, v.descricao, v.inicio_vigencia, v.fim_vigencia, v.fim_implantacao,
+               v.atributos, v.carga_id, v.publicado_de, v.publicado_ate
+        FROM conceito c
+        JOIN conceito_versao v ON v.conceito_id = c.id
+        WHERE c.tabela_id = :tabela AND c.codigo = :codigo
+        ORDER BY v.publicado_de
+        """),
+        {"tabela": tabela_id, "codigo": codigo},
+    )
+    return list(resultado)
+
+
+async def listar_vigentes(
+    con: AsyncConnection, tabela_id: int, em: date, apos: str | None, limite: int
+) -> list[Row[Any]]:
+    """Conceitos vigentes na data `em`, cada um na versão que valia nela, em ordem de código.
+
+    Mesma regra de `domain/vigencia.py` (os testes de integração conferem que as duas
+    respondem igual): para cada código, a última versão publicada até o dia `em` (ou a
+    mais antiga, se `em` é anterior a todas); fora se o código tinha saído da lista;
+    depois, datas da ANS quando existem, senão o dia em que vimos o código.
+    """
+    params: dict[str, Any] = {"tabela": tabela_id, "em": em, "limite": limite}
+    filtro = ""
+    if apos is not None:
+        filtro = "AND c.codigo > :apos"
+        params["apos"] = apos
+    resultado = await con.execute(
+        text(f"""
+        SELECT c.codigo, v.descricao, v.inicio_vigencia, v.fim_vigencia, v.fim_implantacao,
+               v.atributos
+        FROM conceito c
+        CROSS JOIN LATERAL (
+            SELECT v.*, (v.publicado_de AT TIME ZONE 'UTC')::date AS dia_de,
+                   (v.publicado_ate AT TIME ZONE 'UTC')::date AS dia_ate
+            FROM conceito_versao v
+            WHERE v.conceito_id = c.id
+            ORDER BY (v.publicado_de AT TIME ZONE 'UTC')::date <= :em DESC,
+                     CASE WHEN (v.publicado_de AT TIME ZONE 'UTC')::date <= :em
+                          THEN v.publicado_de END DESC NULLS LAST,
+                     v.publicado_de
+            LIMIT 1
+        ) v
+        WHERE c.tabela_id = :tabela {filtro}
+          AND NOT (v.dia_de <= :em AND v.dia_ate IS NOT NULL AND v.dia_ate <= :em)
+          AND CASE WHEN v.inicio_vigencia IS NOT NULL
+                   THEN v.inicio_vigencia <= :em
+                        AND (v.fim_vigencia IS NULL OR :em <= v.fim_vigencia)
+                   ELSE v.dia_de <= :em END
+        ORDER BY c.codigo
+        LIMIT :limite
+        """),  # noqa: S608 (só trechos fixos entram no texto; valores vão como parâmetro)
+        params,
+    )
+    return list(resultado)
 
 
 # Maior caractere possível: "começa com X" vira o intervalo [X, X + este caractere),

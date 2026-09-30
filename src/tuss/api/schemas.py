@@ -76,6 +76,30 @@ class ConceitoDetalhe(Conceito):
     tabela: str = Field(examples=["tuss-22"])
     carga_id: int = Field(description="Carga publicada de onde veio a resposta")
     sincronizado_em: datetime | None = Field(description="Última vez que a fonte foi conferida")
+    em: date = Field(description="Data consultada: a de `?em=` ou, sem ela, hoje (UTC)")
+    vigente: bool = Field(description="Se o código estava vigente na data consultada")
+
+
+class Versao(BaseModel):
+    descricao: str
+    inicio_vigencia: date | None
+    fim_vigencia: date | None = Field(description="Vazio = período aberto")
+    fim_implantacao: date | None
+    atributos: dict[str, str]
+    criterio: Criterio
+    carga_id: int = Field(description="Carga que publicou esta versão")
+    publicado_de: datetime = Field(description="Quando esta versão entrou na nossa base")
+    publicado_ate: datetime | None = Field(
+        description="Quando foi substituída ou o código saiu da lista; vazio = versão atual"
+    )
+
+
+class Historico(BaseModel):
+    tabela: str = Field(examples=["tuss-22"])
+    codigo: str = Field(examples=["10101012"])
+    carga_id: int = Field(description="Carga publicada que a API está servindo")
+    sincronizado_em: datetime | None
+    versoes: list[Versao] = Field(description="Da mais antiga para a mais nova")
 
 
 class PaginaConceitos(BaseModel):
@@ -102,6 +126,13 @@ class ParametrosLista(BaseModel):
             " mais relevantes primeiro, até `limite`, sem próxima página."
         ),
         examples=["consulta consultorio"],
+    )
+    vigente_em: date | None = Field(
+        None,
+        description=(
+            "Só os conceitos vigentes nesta data (AAAA-MM-DD), cada um como era nela."
+            " Não se combina com `q`."
+        ),
     )
     cursor: str | None = Field(None, description="Valor de `proximo_cursor` da página anterior")
     limite: int = Field(50, ge=1, le=200, description="Itens por página")

@@ -1,6 +1,7 @@
 """Consulta: tabelas, lista paginada de conceitos e conceito por código."""
 
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -153,6 +154,8 @@ async def test_conceito_por_codigo_traz_dados_carga_e_criterio(
         "criterio": "oficial",
         "carga_id": 1,
         "sincronizado_em": r.json()["sincronizado_em"],
+        "em": datetime.now(UTC).date().isoformat(),
+        "vigente": True,
     }
 
 
