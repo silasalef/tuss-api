@@ -76,6 +76,9 @@ async def publicar(
 
     `aprovada`: o operador já viu a carga retida e mandou publicar mesmo assim.
     """
+    # Estatísticas do rascunho recém-gravado: sem isso, numa carga grande o Postgres
+    # acha que ele está vazio e escolhe planos que o releem inteiro para cada linha.
+    await con.execute(text("ANALYZE stg_conceito"))
     atual = (
         await con.execute(
             text(
@@ -117,6 +120,7 @@ async def _publicar_carga_inicial(con: AsyncConnection, carga_id: int, tabela_id
         ),
         params,
     )
+    await con.execute(text("ANALYZE conceito"))  # idem, para os conceitos recém-criados
     await _inserir_versoes(con, carga_id, tabela_id, None)
     incluidos: int = (
         await con.execute(text("SELECT count(*) FROM stg_conceito WHERE carga_id = :carga"), params)
