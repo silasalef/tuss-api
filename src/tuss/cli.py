@@ -42,9 +42,10 @@ def inspecionar(caminho: ArquivoDoPortal) -> None:
 
 @app.command(name="importar")
 def importar_arquivo(caminho: ArquivoDoPortal) -> None:
-    """Importa um arquivo do portal: carga inicial de uma tabela.
+    """Importa um arquivo do portal: carga inicial ou atualização de uma tabela.
 
     Valida o arquivo inteiro antes de gravar; se houver qualquer problema, nada é gravado.
+    Numa tabela já carregada, publica só o que mudou e registra cada mudança no histórico.
     Importar de novo o mesmo arquivo só registra que não houve mudança.
     """
     lote = _ler(caminho)
@@ -57,15 +58,14 @@ def importar_arquivo(caminho: ArquivoDoPortal) -> None:
 
     typer.echo("")
     if resultado.status == "sem_mudanca":
-        typer.echo(
-            f"Carga {resultado.carga_id}: {resultado.tabela} sem mudança"
-            " (mesmo arquivo da última carga)."
-        )
+        typer.echo(f"Carga {resultado.carga_id}: {resultado.tabela} sem mudança.")
     else:
-        typer.echo(
-            f"Carga {resultado.carga_id}: {resultado.tabela} publicada com"
-            f" {resultado.incluidos} conceitos."
-        )
+        typer.echo(f"Carga {resultado.carga_id}: {resultado.tabela} publicada.")
+        typer.echo(f"Incluídos:   {resultado.incluidos}")
+        typer.echo(f"Alterados:   {resultado.alterados}")
+        typer.echo(f"Removidos:   {resultado.removidos}")
+        typer.echo(f"Reativados:  {resultado.reativados}")
+    if resultado.snapshot is not None:
         typer.echo(f"Snapshot:    {resultado.snapshot}")
 
 

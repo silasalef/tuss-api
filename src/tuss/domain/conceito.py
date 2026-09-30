@@ -44,14 +44,24 @@ class Conceito:
         acento conta (é outra palavra).
         """
         partes = {
-            "descricao": _chave_texto(self.descricao),
+            "descricao": chave_texto(self.descricao),
             "inicio_vigencia": _data_iso(self.inicio_vigencia),
             "fim_vigencia": _data_iso(self.fim_vigencia),
             "fim_implantacao": _data_iso(self.fim_implantacao),
-            "atributos": {k: _chave_texto(v) for k, v in sorted(self.atributos.items())},
+            "atributos": {k: chave_texto(v) for k, v in sorted(self.atributos.items())},
         }
         bruto = json.dumps(partes, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
         return hashlib.sha256(bruto.encode("utf-8")).hexdigest()
+
+    def como_dict(self) -> dict[str, Any]:
+        """Conteúdo do conceito em JSON (datas em AAAA-MM-DD), como vai para os eventos."""
+        return {
+            "descricao": self.descricao,
+            "inicio_vigencia": _data_iso(self.inicio_vigencia),
+            "fim_vigencia": _data_iso(self.fim_vigencia),
+            "fim_implantacao": _data_iso(self.fim_implantacao),
+            "atributos": dict(sorted(self.atributos.items())),
+        }
 
 
 def normalizar_texto(valor: str) -> str:
@@ -113,7 +123,8 @@ def _data(valor: Any, tabela: str, codigo: str, nome: str) -> date | None:
         ) from exc
 
 
-def _chave_texto(valor: str) -> str:
+def chave_texto(valor: str) -> str:
+    """Forma usada para comparar: a canônica, sem diferença de maiúsculas/minúsculas."""
     return normalizar_texto(valor).casefold()
 
 
