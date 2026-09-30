@@ -28,7 +28,8 @@ uv sync
 cp .env.example .env                           # e troque as senhas
 docker compose up -d                           # sobe o PostgreSQL (sem porta publicada)
 docker compose run --rm --build tuss alembic upgrade head  # cria as tabelas
-uv run pytest                                  # testes
+uv run pytest                                  # todos os testes (os de integração sobem um Postgres temporário)
+uv run pytest -m "not integracao"             # só os rápidos, sem Docker
 uv run tuss inspecionar caminho/do/arquivo.zip # valida um arquivo baixado do portal da ANS
 ```
 

@@ -29,9 +29,8 @@ def _aplicar(conexao: Connection) -> None:
 
 
 async def _principal() -> None:
-    # Os testes informam o endereço direto; fora deles, vem das variáveis TUSS_DB_*.
-    url = context.config.get_main_option("sqlalchemy.url") or Config().url_banco(PAPEL_DONO)
-    engine = create_async_engine(url, poolclass=pool.NullPool)
+    # Endereço e senha vêm das variáveis TUSS_DB_* (também nos testes).
+    engine = create_async_engine(Config().url_banco(PAPEL_DONO), poolclass=pool.NullPool)
     try:
         async with engine.connect() as conexao:
             await conexao.run_sync(_aplicar)
