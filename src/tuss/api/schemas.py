@@ -21,7 +21,9 @@ class UltimaCarga(BaseModel):
     status: StatusCarga
     iniciada_em: datetime
     finalizada_em: datetime | None
-    erro: str | None = Field(description="Motivo, quando a carga falhou")
+    erro: str | None = Field(
+        description="Motivo da falha, da retenção pelo limite de anomalia ou da decisão manual"
+    )
     incluidos: int
     alterados: int
     removidos: int

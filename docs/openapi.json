@@ -1533,7 +1533,7 @@
               }
             ],
             "title": "Erro",
-            "description": "Motivo, quando a carga falhou"
+            "description": "Motivo da falha, da retenção pelo limite de anomalia ou da decisão manual"
           },
           "incluidos": {
             "type": "integer",

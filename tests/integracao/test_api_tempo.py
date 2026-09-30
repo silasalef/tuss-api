@@ -19,6 +19,7 @@ import pytest
 from conftest import BancoDeTeste, auth, cliente_da_api
 
 from tuss.config import PAPEL_DONO
+from tuss.ingestion.decisao import aprovar
 from tuss.ingestion.importacao import importar
 from tuss.ingestion.lote import ler_lote
 
@@ -41,7 +42,9 @@ async def cenario(bd: BancoDeTeste, tmp_path: Path) -> AsyncIterator[httpx.Async
     v2.write_text(json.dumps(variante, ensure_ascii=False), encoding="utf-8")
 
     for arquivo in (PAGINA_TUSS_22, v2, PAGINA_TUSS_22):
-        await importar(ler_lote(arquivo), config)
+        resultado = await importar(ler_lote(arquivo), config)
+        if resultado.status == "retida":  # remover 1 de 25 passa do limite de anomalia
+            await aprovar(resultado.carga_id, config)
 
     # As três cargas aconteceram agora; cada uma passa para o seu dia, numa instrução só
     # (início e fim de cada versão mudam juntos). Os dias novos são todos anteriores aos

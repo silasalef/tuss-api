@@ -9,6 +9,7 @@ import pytest
 from conftest import BancoDeTeste
 
 from tuss.config import PAPEL_API, PAPEL_INGESTAO, Config
+from tuss.ingestion.decisao import aprovar
 from tuss.ingestion.importacao import ImportacaoRecusada, importar
 from tuss.ingestion.lote import ler_lote
 
@@ -116,8 +117,11 @@ async def test_atualizacao_publica_so_o_que_mudou_com_eventos(
 
     resultado = await importar(ler_lote(_variante(tmp_path, "v2", registros)), config)
 
-    assert resultado.status == "publicada"
+    # Remover 1 de 25 (4%) passa do limite de anomalia (2%): fica retida até ser aprovada.
+    assert resultado.status == "retida"
     assert (resultado.incluidos, resultado.alterados, resultado.removidos) == (1, 1, 1)
+    assert await _contar(bd, "evento_mudanca") == 0
+    assert (await aprovar(resultado.carga_id, config)).status == "publicada"
     assert await _eventos(bd) == [
         ("30914175", "removido", None),
         ("30918090", "alterado", ["fim_vigencia"]),

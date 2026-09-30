@@ -10,7 +10,7 @@ import typer
 
 from tuss.api.token import gerar_token, hash_token
 from tuss.config import Config
-from tuss.ingestion import arquivo
+from tuss.ingestion import arquivo, decisao
 from tuss.ingestion.catalogo import sincronizar_catalogo
 from tuss.ingestion.fonte import ClienteANS, FonteIndisponivel, RespostaInvalida
 from tuss.ingestion.importacao import ImportacaoRecusada, importar
@@ -59,6 +59,14 @@ def importar_arquivo(caminho: ArquivoDoPortal) -> None:
         raise typer.Exit(1) from exc
 
     typer.echo("")
+    if resultado.status == "retida":
+        typer.echo(f"Carga {resultado.carga_id}: {resultado.tabela} RETIDA, nada foi publicado.")
+        typer.echo(f"Motivo:      {resultado.motivo_retencao}")
+        typer.echo(
+            f"Confira e decida: tuss aprovar {resultado.carga_id}"
+            f" ou tuss descartar {resultado.carga_id}"
+        )
+        raise typer.Exit(2)
     if resultado.status == "sem_mudanca":
         typer.echo(f"Carga {resultado.carga_id}: {resultado.tabela} sem mudança.")
     else:
@@ -69,6 +77,56 @@ def importar_arquivo(caminho: ArquivoDoPortal) -> None:
         typer.echo(f"Reativados:  {resultado.reativados}")
     if resultado.snapshot is not None:
         typer.echo(f"Snapshot:    {resultado.snapshot}")
+
+
+CargaId = Annotated[int, typer.Argument(help="Número da carga retida")]
+SemPerguntar = Annotated[bool, typer.Option("--sim", help="Não pede confirmação")]
+
+
+@app.command()
+def aprovar(carga_id: CargaId, sim: SemPerguntar = False) -> None:
+    """Publica uma carga retida pelo limite de anomalia, depois de conferida."""
+    carga = _carga_retida(carga_id)
+    if not sim:
+        typer.confirm("Publicar mesmo assim?", abort=True)
+    try:
+        resultado = asyncio.run(decisao.aprovar(carga_id, Config()))
+    except decisao.DecisaoRecusada as exc:
+        typer.echo(f"Não aprovada: {exc}", err=True)
+        raise typer.Exit(1) from exc
+    typer.echo(
+        f"Carga {carga_id}: {carga.tabela} {resultado.status} ({resultado.total} conceitos)."
+    )
+
+
+@app.command()
+def descartar(carga_id: CargaId, sim: SemPerguntar = False) -> None:
+    """Descarta uma carga retida: nada é publicado."""
+    carga = _carga_retida(carga_id)
+    if not sim:
+        typer.confirm("Descartar esta carga?", abort=True)
+    try:
+        asyncio.run(decisao.descartar(carga_id, Config()))
+    except decisao.DecisaoRecusada as exc:
+        typer.echo(f"Não descartada: {exc}", err=True)
+        raise typer.Exit(1) from exc
+    typer.echo(f"Carga {carga_id}: {carga.tabela} descartada.")
+
+
+def _carga_retida(carga_id: int) -> decisao.CargaRetida:
+    try:
+        carga = asyncio.run(decisao.consultar(carga_id, Config()))
+    except decisao.DecisaoRecusada as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+    typer.echo(f"Carga {carga.id}: {carga.tabela}")
+    typer.echo(f"Motivo:      {carga.motivo}")
+    typer.echo(f"Incluídos:   {carga.incluidos}")
+    typer.echo(f"Alterados:   {carga.alterados}")
+    typer.echo(f"Removidos:   {carga.removidos}")
+    typer.echo(f"Reativados:  {carga.reativados}")
+    typer.echo(f"Conceitos depois: {carga.total}")
+    return carga
 
 
 @app.command()
