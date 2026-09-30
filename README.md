@@ -8,12 +8,12 @@ API de consulta às 65 tabelas TUSS da ANS com **histórico de versões** e **vi
 
 A ANS publica as tabelas TUSS, mas só o estado atual: não guarda histórico. A API oficial leva de 2 a 3 minutos por página de 25 itens, e os arquivos em lote das tabelas grandes ficam desatualizados. Este projeto coleta, valida e versiona esses dados para que uma consulta como "o código X estava vigente em 01/03/2026?" responda em milissegundos.
 
-A investigação da fonte está em [`docs/fonte-ans.md`](docs/fonte-ans.md) e a estratégia de coleta em [`docs/adr/0001-estrategia-de-coleta.md`](docs/adr/0001-estrategia-de-coleta.md). O desenho completo está em [`docs/PLANEJAMENTO.md`](docs/PLANEJAMENTO.md).
+A investigação da fonte está em [`docs/fonte-ans.md`](docs/fonte-ans.md) e as decisões em [`docs/adr/`](docs/adr/) (estratégia de coleta, carga inicial). O desenho completo está em [`docs/PLANEJAMENTO.md`](docs/PLANEJAMENTO.md).
 
 ## Estado
 
 - [x] Fase 0: descoberta da fonte
-- [ ] Fase 1: fundação (modelo de dados e importação de arquivos) ← em andamento
+- [x] Fase 1: fundação (modelo de dados e importação de arquivos)
 - [ ] Fase 2: API de leitura
 - [ ] Fase 3: histórico, vigência e feed de mudanças
 - [ ] Fase 4: atualização automática
