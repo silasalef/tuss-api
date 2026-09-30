@@ -35,6 +35,7 @@ CodigoTabela = Annotated[
 CodigoConceito = Annotated[str, Path(max_length=40, examples=["10101012"])]
 
 _RE_TABELA = re.compile(r"^(?:tuss-)?([0-9]{1,3})$")
+_RE_PONTUACAO_DE_CODIGO = re.compile(r"[.\-\s]")
 _NAO_ENCONTRADA: dict[int | str, dict[str, Any]] = {
     404: {"description": "Tabela ou código não encontrado"}
 }
@@ -96,8 +97,13 @@ async def listar_tabelas(con: Conexao) -> ListaTabelas:
 async def listar_conceitos(
     tabela: CodigoTabela, params: Annotated[ParametrosLista, Query()], con: Conexao
 ) -> PaginaConceitos:
-    """Paginado por cursor: para a próxima página, repita a chamada com `cursor=proximo_cursor`."""
+    """Sem `q`: todos, paginados por cursor (repita a chamada com `cursor=proximo_cursor`).
+
+    Com `q`: busca, dos mais relevantes para os menos, até `limite` resultados.
+    """
     t = await _tabela(con, tabela)
+    if params.q is not None:
+        return await _buscar(con, t, params.q, params.cursor, params.limite)
     apos = cursor.decodificar(params.cursor) if params.cursor else None
     # Pede um a mais só para saber se existe próxima página.
     linhas = await consultas.listar_conceitos(con, t.id, apos, params.limite + 1)
@@ -129,6 +135,27 @@ async def consultar_conceito(
         tabela=t.codigo,
         carga_id=t.carga_atual_id,
         sincronizado_em=t.ultima_sync_em,
+    )
+
+
+async def _buscar(
+    con: AsyncConnection, t: Row[Any], q: str, cursor_informado: str | None, limite: int
+) -> PaginaConceitos:
+    if cursor_informado:
+        # Resultado por relevância não tem "próxima página" estável: refine a busca.
+        raise HTTPException(400, "cursor não se aplica à busca; refine o texto de q")
+    # "1.01.01.01-2" (como aparece em guia e tabela impressa) vira "10101012".
+    como_codigo = _RE_PONTUACAO_DE_CODIGO.sub("", q)
+    if como_codigo.isascii() and como_codigo.isdigit():  # isdigit sozinho aceita "²"
+        linhas = await consultas.buscar_por_codigo(con, t.id, como_codigo, limite)
+    else:
+        linhas = await consultas.buscar_por_texto(con, t.id, q, limite)
+    return PaginaConceitos(
+        tabela=t.codigo,
+        carga_id=t.carga_atual_id,
+        sincronizado_em=t.ultima_sync_em,
+        itens=[_conceito(linha) for linha in linhas],
+        proximo_cursor=None,
     )
 
 

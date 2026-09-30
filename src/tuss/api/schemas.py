@@ -89,7 +89,19 @@ class PaginaConceitos(BaseModel):
 
 
 class ParametrosLista(BaseModel):
-    model_config = ConfigDict(extra="forbid")  # parâmetro desconhecido (ex.: `limit`) é erro
+    # Parâmetro desconhecido (ex.: `limit`) é erro; espaços nas pontas são ignorados.
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
+    q: str | None = Field(
+        None,
+        min_length=3,
+        max_length=100,
+        description=(
+            "Busca. Código ou começo de código (`1010`, `1.01.01.01-2`) ou texto da"
+            " descrição, sem precisar de acento e tolerando erro de digitação. Devolve os"
+            " mais relevantes primeiro, até `limite`, sem próxima página."
+        ),
+        examples=["consulta consultorio"],
+    )
     cursor: str | None = Field(None, description="Valor de `proximo_cursor` da página anterior")
     limite: int = Field(50, ge=1, le=200, description="Itens por página")

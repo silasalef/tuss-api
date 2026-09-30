@@ -98,3 +98,59 @@ async def conceito(con: AsyncConnection, tabela_id: int, codigo: str) -> Row[Any
         {"tabela": tabela_id, "codigo": codigo},
     )
     return resultado.one_or_none()
+
+
+# Maior caractere possível: "começa com X" vira o intervalo [X, X + este caractere),
+# que o índice de código (collation "C", ordem byte a byte) resolve direto.
+_MAIOR_CARACTERE = chr(0x10FFFF)
+
+
+async def buscar_por_codigo(
+    con: AsyncConnection, tabela_id: int, prefixo: str, limite: int
+) -> list[Row[Any]]:
+    """Códigos que começam com `prefixo`, em ordem (o código exato, se existir, vem primeiro)."""
+    resultado = await con.execute(
+        text(f"""
+        SELECT {_COLUNAS_CONCEITO}
+        WHERE c.tabela_id = :tabela AND c.codigo >= :inicio AND c.codigo < :fim
+        ORDER BY c.codigo
+        LIMIT :limite
+        """),  # noqa: S608 (só trechos fixos entram no texto; valores vão como parâmetro)
+        {
+            "tabela": tabela_id,
+            "inicio": prefixo,
+            "fim": prefixo + _MAIOR_CARACTERE,
+            "limite": limite,
+        },
+    )
+    return list(resultado)
+
+
+async def buscar_por_texto(
+    con: AsyncConnection, tabela_id: int, termo: str, limite: int
+) -> list[Row[Any]]:
+    """Descrições que batem com `termo`, das mais para as menos relevantes.
+
+    Primeiro as que têm todas as palavras (full-text, pela raiz da palavra); depois
+    as parecidas (trigramas, para erro de digitação). Empate: ordem de código.
+    """
+    resultado = await con.execute(
+        text(f"""
+        WITH termo AS (
+            SELECT websearch_to_tsquery('portuguese', tuss_sem_acento(:termo)) AS consulta,
+                   lower(tuss_sem_acento(:termo)) AS normalizado
+        )
+        SELECT {_COLUNAS_CONCEITO}
+        CROSS JOIN termo
+        WHERE c.tabela_id = :tabela
+          AND (v.busca @@ termo.consulta OR termo.normalizado <% v.descricao_normalizada)
+        ORDER BY
+            v.busca @@ termo.consulta DESC,
+            ts_rank(v.busca, termo.consulta) DESC,
+            word_similarity(termo.normalizado, v.descricao_normalizada) DESC,
+            c.codigo
+        LIMIT :limite
+        """),  # noqa: S608 (só trechos fixos entram no texto; valores vão como parâmetro)
+        {"tabela": tabela_id, "termo": termo, "limite": limite},
+    )
+    return list(resultado)
