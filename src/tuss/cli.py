@@ -10,7 +10,7 @@ import typer
 
 from tuss.api.token import gerar_token, hash_token
 from tuss.config import Config
-from tuss.ingestion import arquivo, decisao
+from tuss.ingestion import arquivo, coleta, decisao
 from tuss.ingestion.catalogo import sincronizar_catalogo
 from tuss.ingestion.fonte import ClienteANS, FonteIndisponivel, RespostaInvalida
 from tuss.ingestion.importacao import ImportacaoRecusada, importar
@@ -77,6 +77,59 @@ def importar_arquivo(caminho: ArquivoDoPortal) -> None:
         typer.echo(f"Reativados:  {resultado.reativados}")
     if resultado.snapshot is not None:
         typer.echo(f"Snapshot:    {resultado.snapshot}")
+
+
+@app.command()
+def coletar(
+    tabela: Annotated[str, typer.Argument(help="`tuss-22` ou só `22`")],
+    completa: Annotated[
+        bool, typer.Option("--completa", help="Lê a tabela inteira (detecta remoções)")
+    ] = False,
+) -> None:
+    """Coleta uma tabela pela API da ANS e publica o que mudou.
+
+    Sem --completa: se a tabela já tem carga, lê só o começo da lista (onde a ANS põe os
+    códigos novos); senão, lê tudo. Uma coleta completa interrompida é retomada de onde
+    parou na próxima execução.
+    """
+    codigo = tabela if tabela.startswith("tuss-") else f"tuss-{tabela}"
+
+    async def _rodar() -> coleta.ResultadoColeta:
+        async with ClienteANS() as ans:
+            return await coleta.coletar(
+                codigo, ans, Config(), modo="completa" if completa else None
+            )
+
+    try:
+        resultado = asyncio.run(_rodar())
+    except (
+        coleta.ColetaRecusada,
+        coleta.DadosInvalidos,
+        FonteIndisponivel,
+        RespostaInvalida,
+    ) as exc:
+        typer.echo(f"Coleta não feita: {exc}", err=True)
+        raise typer.Exit(1) from exc
+    typer.echo(
+        f"Carga {resultado.carga_id}: {resultado.tabela} ({resultado.modo},"
+        f" {resultado.paginas_lidas} páginas lidas) {resultado.status}."
+    )
+    if resultado.contagem is not None:
+        c = resultado.contagem
+        typer.echo(
+            f"Incluídos {c['incluido']}, alterados {c['alterado']}, removidos {c['removido']},"
+            f" reativados {c['reativado']}; {resultado.total} conceitos publicados."
+        )
+    if resultado.motivo:
+        typer.echo(f"Motivo:      {resultado.motivo}")
+    if resultado.status == "retida":
+        typer.echo(
+            f"Decida: tuss aprovar {resultado.carga_id} ou tuss descartar {resultado.carga_id}"
+        )
+        raise typer.Exit(2)
+    if resultado.status == "em_andamento":
+        typer.echo("A fonte parou de responder; rode de novo para continuar de onde parou.")
+        raise typer.Exit(3)
 
 
 CargaId = Annotated[int, typer.Argument(help="Número da carga retida")]

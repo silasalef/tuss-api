@@ -1,0 +1,177 @@
+"""Coleta pela API com uma ANS falsa (sem rede): completa, retomada e incremental."""
+
+import json
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+import httpx
+import pytest
+from conftest import BancoDeTeste
+
+from tuss.config import PAPEL_API, PAPEL_INGESTAO, Config
+from tuss.ingestion.coleta import ColetaRecusada, DadosInvalidos, coletar
+from tuss.ingestion.fonte import ClienteANS
+
+PAGINA_TUSS_22 = Path(__file__).parents[1] / "fixtures" / "ans" / "concepts_tuss-22_page1.json"
+REGISTROS: list[dict[str, Any]] = json.loads(PAGINA_TUSS_22.read_text(encoding="utf-8"))
+
+
+@dataclass
+class ANSFalsa:
+    """Pagina `registros` de 5 em 5, como a ANS faz de 25 em 25."""
+
+    registros: list[dict[str, Any]]
+    por_pagina: int = 5
+    fora_do_ar: set[int] = field(default_factory=set)  # páginas que sempre dão timeout
+    paginas_informadas: int | None = None  # para simular a lista mudando no meio
+    pedidas: list[int] = field(default_factory=list)
+
+    def __call__(self, pedido: httpx.Request) -> httpx.Response:
+        numero = int(pedido.url.params["page"])
+        self.pedidas.append(numero)
+        if numero in self.fora_do_ar:
+            raise httpx.ReadTimeout("fora do ar", request=pedido)
+        total = -(-len(self.registros) // self.por_pagina)
+        inicio = (numero - 1) * self.por_pagina
+        corpo = json.dumps(self.registros[inicio : inicio + self.por_pagina]).encode()
+        return httpx.Response(
+            200, content=corpo, headers={"pages": str(self.paginas_informadas or total)}
+        )
+
+    def cliente(self) -> ClienteANS:
+        return ClienteANS(transporte=httpx.MockTransport(self), espera_base_s=0)
+
+
+@pytest.fixture
+def config(bd: BancoDeTeste, tmp_path: Path) -> Config:
+    return bd.config.model_copy(update={"snapshots_dir": tmp_path / "snapshots"})
+
+
+async def _coletar(ans: ANSFalsa, config: Config, **kwargs: Any) -> Any:
+    async with ans.cliente() as cliente:
+        return await coletar("tuss-22", cliente, config, **kwargs)
+
+
+async def _um(bd: BancoDeTeste, sql: str, papel: str = PAPEL_API) -> Any:
+    return (await bd.executar(papel, sql))[0][0]
+
+
+async def test_primeira_coleta_e_completa(bd: BancoDeTeste, config: Config) -> None:
+    ans = ANSFalsa(REGISTROS)
+    resultado = await _coletar(ans, config)
+
+    assert (resultado.modo, resultado.status, resultado.paginas_lidas) == (
+        "completa",
+        "publicada",
+        5,
+    )
+    assert (resultado.total, resultado.contagem["incluido"]) == (25, 25)
+    assert ans.pedidas == [1, 2, 3, 4, 5]
+    carga = (
+        await bd.executar(
+            PAPEL_API, "SELECT origem, modo, checkpoint, paginas, sha256_snapshot FROM carga"
+        )
+    )[0]
+    assert (carga.origem, carga.modo, carga.checkpoint, carga.paginas) == ("api", "completa", 5, 5)
+    assert len(carga.sha256_snapshot) == 64
+    snapshots = sorted((config.snapshots_dir / "tuss-22" / "carga-1").iterdir())
+    assert [s.name for s in snapshots] == [f"pagina-0000{n}.json.gz" for n in range(1, 6)]
+    assert await _um(bd, "SELECT count(*) FROM evento_mudanca") == 0  # carga inicial
+
+
+async def test_coleta_completa_retoma_de_onde_parou(bd: BancoDeTeste, config: Config) -> None:
+    ans = ANSFalsa(REGISTROS, fora_do_ar={3})
+    parou = await _coletar(ans, config)
+    assert (parou.status, parou.carga_id) == ("em_andamento", 1)
+    assert "4 tentativas" in (parou.motivo or "")
+    assert await _um(bd, "SELECT checkpoint FROM carga") == 2
+    assert await _um(bd, "SELECT count(*) FROM stg_conceito", PAPEL_INGESTAO) == 10
+
+    ans.fora_do_ar.clear()
+    ans.pedidas.clear()
+    resultado = await _coletar(ans, config)
+    assert (resultado.carga_id, resultado.status, resultado.total) == (1, "publicada", 25)
+    assert ans.pedidas == [3, 4, 5]  # não relê o que já tinha
+
+
+async def test_lista_mudando_no_meio_faz_recomecar(bd: BancoDeTeste, config: Config) -> None:
+    ans = ANSFalsa(REGISTROS, fora_do_ar={3})
+    await _coletar(ans, config)
+    ans.fora_do_ar.clear()
+    ans.paginas_informadas = 6  # a ANS publicou algo enquanto isso
+
+    with pytest.raises(DadosInvalidos, match="de 5 para 6 páginas"):
+        await _coletar(ans, config)
+    assert await _um(bd, "SELECT status FROM carga WHERE id = 1") == "falhou"
+    assert await _um(bd, "SELECT count(*) FROM stg_conceito", PAPEL_INGESTAO) == 0
+
+    ans.paginas_informadas = None
+    resultado = await _coletar(ans, config)
+    assert (resultado.carga_id, resultado.status) == (2, "publicada")
+
+
+async def test_incremental_le_so_o_topo_e_nao_remove(bd: BancoDeTeste, config: Config) -> None:
+    await _coletar(ANSFalsa(REGISTROS), config)
+
+    novos = [{**REGISTROS[0], "id": f"9999999{n}", "display_name": f"Novo {n}"} for n in (1, 2)]
+    alterado = {**REGISTROS[0], "display_name": REGISTROS[0]["display_name"] + " (revisado)"}
+    # Dois novos no topo, o primeiro alterado, e o último código fora da lista.
+    ans = ANSFalsa([*novos, alterado, *REGISTROS[1:-1]])
+    resultado = await _coletar(ans, config)
+
+    assert (resultado.modo, resultado.status) == ("incremental", "publicada")
+    assert ans.pedidas == [1, 2, 3]  # página 1 com novidade; 2 e 3 sem: para
+    contagem = resultado.contagem
+    assert (contagem["incluido"], contagem["alterado"], contagem["removido"]) == (2, 1, 0)
+    assert resultado.total == 27
+    ultimo = REGISTROS[-1]["id"]
+    assert (
+        await _um(
+            bd,
+            f"""SELECT count(*) FROM conceito c JOIN conceito_versao v ON v.conceito_id = c.id
+                WHERE c.codigo = '{ultimo}' AND v.publicado_ate IS NULL""",
+        )
+        == 1
+    )  # não lido não é removido
+    assert await _um(bd, "SELECT modo FROM carga WHERE id = 2") == "incremental"
+
+
+async def test_incremental_sem_novidade(bd: BancoDeTeste, config: Config) -> None:
+    await _coletar(ANSFalsa(REGISTROS), config)
+    ans = ANSFalsa(REGISTROS)
+    resultado = await _coletar(ans, config)
+    assert (resultado.status, ans.pedidas) == ("sem_mudanca", [1, 2])
+    assert await _um(bd, "SELECT carga_atual_id FROM tabela_tuss") == 1
+
+
+async def test_incremental_exige_carga_anterior(config: Config) -> None:
+    with pytest.raises(ColetaRecusada, match="primeira precisa ser completa"):
+        await _coletar(ANSFalsa(REGISTROS), config, modo="incremental")
+
+
+async def test_completa_pedida_explicitamente_detecta_remocao(config: Config) -> None:
+    await _coletar(ANSFalsa(REGISTROS), config)
+    resultado = await _coletar(ANSFalsa(REGISTROS[:-1]), config, modo="completa")
+    # 1 de 25 removido (4%): passa do limite de anomalia.
+    assert (resultado.status, resultado.contagem["removido"]) == ("retida", 1)
+    with pytest.raises(ColetaRecusada, match="retida"):
+        await _coletar(ANSFalsa(REGISTROS), config)
+
+
+@pytest.mark.parametrize(
+    "estragar",
+    [
+        lambda r: {**r, "source": "tuss-20"},  # conceito de outra tabela
+        lambda r: {**r, "extras": {"inicio_vigencia": "31/12/2020"}},  # data fora do formato
+    ],
+)
+async def test_dado_invalido_da_ans_falha_alto(
+    bd: BancoDeTeste, config: Config, estragar: Any
+) -> None:
+    registros = [*REGISTROS[:7], estragar(REGISTROS[7]), *REGISTROS[8:]]
+    with pytest.raises(DadosInvalidos, match="página 2"):
+        await _coletar(ANSFalsa(registros), config)
+    assert await _um(bd, "SELECT status FROM carga") == "falhou"
+    assert await _um(bd, "SELECT count(*) FROM stg_conceito", PAPEL_INGESTAO) == 0
+    assert await _um(bd, "SELECT count(*) FROM conceito") == 0
