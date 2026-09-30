@@ -25,8 +25,9 @@ Requer [uv](https://docs.astral.sh/uv/) e Docker.
 
 ```bash
 uv sync
-cp .env.example .env                           # e troque a senha
+cp .env.example .env                           # e troque as senhas
 docker compose up -d                           # sobe o PostgreSQL (sem porta publicada)
+docker compose run --rm --build tuss alembic upgrade head  # cria as tabelas
 uv run pytest                                  # testes
 uv run tuss inspecionar caminho/do/arquivo.zip # valida um arquivo baixado do portal da ANS
 ```

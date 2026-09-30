@@ -1,9 +1,11 @@
-# Serviços do tuss-api. Por enquanto só o banco; a API e o worker entram nas próximas fases.
+# Serviços do tuss-api. Por enquanto o banco e o CLI; a API e o worker entram nas próximas fases.
 #
 # Uso:
-#   cp .env.example .env   # e troque a senha
-#   docker compose up -d
-#   docker compose exec postgres psql -U tuss   # abrir o banco
+#   cp .env.example .env   # e troque as senhas
+#   docker compose up -d                                  # sobe o banco
+#   docker compose run --rm --build tuss alembic upgrade head   # aplica as migrations
+#   docker compose run --rm tuss tuss --help              # qualquer comando do CLI
+#   docker compose exec postgres psql -U tuss             # abrir o banco
 #
 # Regras (ver docs/PLANEJAMENTO.md):
 # - nenhuma porta publicada: o banco só é alcançável pelos containers deste projeto;
@@ -47,6 +49,25 @@ services:
       options:
         max-size: 10m # evita que o log encha o disco
         max-file: "3"
+
+  # CLI e migrations. Não sobe com `up`: só roda quando chamado com `docker compose run`.
+  tuss:
+    build: .
+    image: tuss-api:local
+    profiles: [cli]
+    environment:
+      TUSS_DB_SENHA_DONO: ${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}
+      TUSS_DB_SENHA_INGESTAO: ${TUSS_DB_SENHA_INGESTAO:?defina TUSS_DB_SENHA_INGESTAO no .env}
+      TUSS_DB_SENHA_API: ${TUSS_DB_SENHA_API:?defina TUSS_DB_SENHA_API no .env}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    mem_limit: 512m
+    read_only: true # o container não altera os próprios arquivos
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
 
 volumes:
   pgdata:

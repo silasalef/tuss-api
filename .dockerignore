@@ -1,0 +1,7 @@
+# Lista do que PODE entrar na imagem (todo o resto fica de fora, inclusive .env e dados).
+*
+!pyproject.toml
+!uv.lock
+!alembic.ini
+!src/
+**/__pycache__
