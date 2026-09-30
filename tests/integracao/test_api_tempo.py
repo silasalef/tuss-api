@@ -1,4 +1,4 @@
-"""Tempo na API: histórico de versões, `?em=` e `vigente_em`.
+"""Tempo na API: histórico, `?em=`, `vigente_em`, validação em lote e feed de mudanças.
 
 Cenário (as mesmas três cargas do teste manual da etapa 1), com as datas de
 publicação levadas para dias diferentes de setembro de 2026:
@@ -57,6 +57,8 @@ async def cenario(bd: BancoDeTeste, tmp_path: Path) -> AsyncIterator[httpx.Async
         PAPEL_DONO,
         f"UPDATE conceito_versao SET publicado_de = CASE publicado_de {casos} END,"
         f" publicado_ate = CASE publicado_ate {casos} END",
+        # Eventos são gravados na transação da publicação: mesmo instante das versões.
+        f"UPDATE evento_mudanca SET ocorrido_em = CASE ocorrido_em {casos} END",
     )
     async for cliente in cliente_da_api(config):
         yield cliente
@@ -258,3 +260,79 @@ async def test_validacao_tem_limite_proprio_por_minuto(cenario: httpx.AsyncClien
     assert "Retry-After" in r.headers
     # Consultas comuns continuam liberadas: cada tipo tem a sua cota.
     assert (await _get(cenario, f"/v1/tabelas/22/conceitos/{ALTERADO}")).status_code == 200
+
+
+# Feed de mudanças
+
+
+async def _mudancas(cliente: httpx.AsyncClient, **params: Any) -> list[tuple[str, str, str]]:
+    corpo = (await _get(cliente, "/v1/mudancas", **params)).json()
+    return [(m["ocorrido_em"][:10], m["codigo"], m["tipo"]) for m in corpo["itens"]]
+
+
+async def test_feed_traz_as_mudancas_em_ordem(cenario: httpx.AsyncClient) -> None:
+    assert await _mudancas(cenario) == [
+        ("2026-09-20", REMOVIDO, "removido"),
+        ("2026-09-20", ALTERADO, "alterado"),
+        ("2026-09-20", INCLUIDO, "incluido"),
+        ("2026-09-25", REMOVIDO, "reativado"),
+        ("2026-09-25", ALTERADO, "alterado"),
+        ("2026-09-25", INCLUIDO, "removido"),
+    ]
+
+
+async def test_feed_mostra_antes_e_depois(cenario: httpx.AsyncClient) -> None:
+    corpo = (await _get(cenario, "/v1/mudancas", tipo="alterado", limite=1)).json()
+    (mudanca,) = corpo["itens"]
+    assert (mudanca["tabela"], mudanca["carga_id"]) == ("tuss-22", 2)
+    assert mudanca["campos_alterados"] == ["descricao"]
+    assert mudanca["depois"]["descricao"] == mudanca["antes"]["descricao"] + " (teste)"
+    assert mudanca["antes"]["inicio_vigencia"] == "2026-08-01"
+
+    incluido = (await _get(cenario, "/v1/mudancas", tipo="incluido")).json()["itens"][0]
+    assert (incluido["antes"], incluido["campos_alterados"]) == (None, None)
+    assert incluido["depois"]["descricao"] == "Código de teste"
+
+
+async def test_feed_filtra_por_data_tipo_e_tabela(cenario: httpx.AsyncClient) -> None:
+    assert [c for _, c, _ in await _mudancas(cenario, desde="2026-09-21")] == [
+        REMOVIDO,
+        ALTERADO,
+        INCLUIDO,
+    ]
+    assert await _mudancas(cenario, desde="2026-09-25T12:00:01Z") == []
+    assert await _mudancas(cenario, tipo="removido") == [
+        ("2026-09-20", REMOVIDO, "removido"),
+        ("2026-09-25", INCLUIDO, "removido"),
+    ]
+    assert len(await _mudancas(cenario, tabela="tuss-22")) == 6
+    assert (await _get(cenario, "/v1/mudancas", tabela="20")).status_code == 404
+    assert (await _get(cenario, "/v1/mudancas", tipo="apagado")).status_code == 422
+
+
+async def test_feed_pagina_por_cursor_sem_repetir(cenario: httpx.AsyncClient) -> None:
+    primeira = (await _get(cenario, "/v1/mudancas", limite=4)).json()
+    assert len(primeira["itens"]) == 4
+    segunda = (
+        await _get(cenario, "/v1/mudancas", limite=4, cursor=primeira["proximo_cursor"])
+    ).json()
+    assert segunda["proximo_cursor"] is None
+    vistos = [(m["carga_id"], m["codigo"]) for m in primeira["itens"] + segunda["itens"]]
+    assert len(vistos) == len(set(vistos)) == 6
+
+
+@pytest.mark.parametrize("cursor", ["xyz", "MTAxMDEwMTI"])  # lixo; cursor de lista de conceitos
+async def test_feed_com_cursor_invalido_e_400(cenario: httpx.AsyncClient, cursor: str) -> None:
+    assert (await _get(cenario, "/v1/mudancas", cursor=cursor)).status_code == 400
+
+
+async def test_status_mostra_o_que_a_ultima_carga_mudou(cenario: httpx.AsyncClient) -> None:
+    (tabela,) = (await _get(cenario, "/v1/status")).json()["tabelas"]
+    ultima = tabela["ultima_carga"]
+    assert (ultima["id"], ultima["status"]) == (3, "publicada")
+    assert [ultima[k] for k in ("incluidos", "alterados", "removidos", "reativados")] == [
+        0,
+        1,
+        1,
+        1,
+    ]

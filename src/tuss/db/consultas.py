@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from typing import Any
 
 from sqlalchemy import Row, text
@@ -21,11 +21,15 @@ async def status_das_tabelas(con: AsyncConnection) -> list[Row[Any]]:
                atual.total AS conceitos,
                ultima.id AS ultima_id, ultima.status AS ultima_status,
                ultima.iniciada_em AS ultima_iniciada_em,
-               ultima.finalizada_em AS ultima_finalizada_em, ultima.erro AS ultima_erro
+               ultima.finalizada_em AS ultima_finalizada_em, ultima.erro AS ultima_erro,
+               ultima.incluidos AS ultima_incluidos, ultima.alterados AS ultima_alterados,
+               ultima.removidos AS ultima_removidos, ultima.reativados AS ultima_reativados
         FROM tabela_tuss t
         LEFT JOIN carga atual ON atual.id = t.carga_atual_id
         LEFT JOIN LATERAL (
-            SELECT id, status, iniciada_em, finalizada_em, erro FROM carga
+            SELECT id, status, iniciada_em, finalizada_em, erro,
+                   incluidos, alterados, removidos, reativados
+            FROM carga
             WHERE tabela_id = t.id ORDER BY id DESC LIMIT 1
         ) ultima ON true
         ORDER BY t.numero::integer
@@ -236,5 +240,48 @@ async def buscar_por_texto(
         LIMIT :limite
         """),  # noqa: S608 (só trechos fixos entram no texto; valores vão como parâmetro)
         {"tabela": tabela_id, "termo": termo, "limite": limite},
+    )
+    return list(resultado)
+
+
+async def mudancas(
+    con: AsyncConnection,
+    desde: datetime | None,
+    tabela_id: int | None,
+    tipo: str | None,
+    apos: tuple[datetime, int] | None,
+    limite: int,
+) -> list[Row[Any]]:
+    """Eventos de mudança em ordem de acontecimento (instante da publicação, depois id).
+
+    Paginação keyset em (ocorrido_em, id), que o índice `evento_mudanca_feed_idx` resolve.
+    """
+    params: dict[str, Any] = {"limite": limite}
+    filtros = []
+    if desde is not None:
+        filtros.append("e.ocorrido_em >= :desde")
+        params["desde"] = desde
+    if tabela_id is not None:
+        filtros.append("c.tabela_id = :tabela")
+        params["tabela"] = tabela_id
+    if tipo is not None:
+        filtros.append("e.tipo = :tipo")
+        params["tipo"] = tipo
+    if apos is not None:
+        filtros.append("(e.ocorrido_em, e.id) > (:apos_em, :apos_id)")
+        params["apos_em"], params["apos_id"] = apos
+    onde = ("WHERE " + " AND ".join(filtros)) if filtros else ""
+    resultado = await con.execute(
+        text(f"""
+        SELECT e.id, e.ocorrido_em, t.codigo AS tabela, c.codigo, e.tipo, e.campos_alterados,
+               e.antes, e.depois, e.carga_id
+        FROM evento_mudanca e
+        JOIN conceito c ON c.id = e.conceito_id
+        JOIN tabela_tuss t ON t.id = c.tabela_id
+        {onde}
+        ORDER BY e.ocorrido_em, e.id
+        LIMIT :limite
+        """),  # noqa: S608 (só trechos fixos entram no texto; valores vão como parâmetro)
+        params,
     )
     return list(resultado)

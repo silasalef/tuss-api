@@ -22,6 +22,10 @@ class UltimaCarga(BaseModel):
     iniciada_em: datetime
     finalizada_em: datetime | None
     erro: str | None = Field(description="Motivo, quando a carga falhou")
+    incluidos: int
+    alterados: int
+    removidos: int
+    reativados: int
 
 
 class StatusTabela(BaseModel):
@@ -186,3 +190,48 @@ class ResultadoValidacoes(BaseModel):
     vigentes: int
     nao_vigentes: int
     itens: list[ResultadoValidacao] = Field(description="Na mesma ordem do pedido")
+
+
+TipoMudanca = Literal["incluido", "alterado", "removido", "reativado"]
+
+
+class ConteudoConceito(BaseModel):
+    descricao: str
+    inicio_vigencia: date | None
+    fim_vigencia: date | None
+    fim_implantacao: date | None
+    atributos: dict[str, str]
+
+
+class Mudanca(BaseModel):
+    ocorrido_em: datetime = Field(description="Quando a mudança foi publicada na nossa base")
+    tabela: str = Field(examples=["tuss-22"])
+    codigo: str = Field(examples=["10101012"])
+    tipo: TipoMudanca
+    campos_alterados: list[str] | None = Field(
+        description="Só em `alterado`; atributos extras aparecem como `atributos.<nome>`"
+    )
+    antes: ConteudoConceito | None = Field(description="Vazio em incluido e reativado")
+    depois: ConteudoConceito | None = Field(description="Vazio em removido")
+    carga_id: int = Field(description="Carga que trouxe a mudança")
+
+
+class PaginaMudancas(BaseModel):
+    itens: list[Mudanca]
+    proximo_cursor: str | None = Field(
+        description="Passe em `cursor` para continuar; vazio = não há mais mudanças por ora"
+    )
+
+
+class ParametrosMudancas(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    desde: datetime | None = Field(
+        None,
+        description="A partir deste momento (AAAA-MM-DD ou data e hora; sem fuso = UTC)",
+        examples=["2026-09-01"],
+    )
+    tabela: str | None = Field(None, max_length=20, description="`tuss-22` ou só `22`")
+    tipo: TipoMudanca | None = None
+    cursor: str | None = Field(None, description="Valor de `proximo_cursor` da página anterior")
+    limite: int = Field(50, ge=1, le=200, description="Itens por página")

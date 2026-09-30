@@ -19,8 +19,11 @@ from tuss.api.schemas import (
     ConceitoDetalhe,
     Historico,
     ListaTabelas,
+    Mudanca,
     PaginaConceitos,
+    PaginaMudancas,
     ParametrosLista,
+    ParametrosMudancas,
     PedidoValidacao,
     Periodo,
     ResultadoValidacao,
@@ -74,6 +77,10 @@ async def status(con: Conexao) -> Status:
                     iniciada_em=linha.ultima_iniciada_em,
                     finalizada_em=linha.ultima_finalizada_em,
                     erro=linha.ultima_erro,
+                    incluidos=linha.ultima_incluidos,
+                    alterados=linha.ultima_alterados,
+                    removidos=linha.ultima_removidos,
+                    reativados=linha.ultima_reativados,
                 ),
             )
             for linha in linhas
@@ -276,6 +283,41 @@ async def validar(pedido: PedidoValidacao, con: Conexao) -> ResultadoValidacoes:
         )
     vigentes = sum(item.vigente for item in itens)
     return ResultadoValidacoes(vigentes=vigentes, nao_vigentes=len(itens) - vigentes, itens=itens)
+
+
+@rotas.get("/mudancas", summary="Feed de mudanças publicadas", responses=_NAO_ENCONTRADA)
+async def mudancas(params: Annotated[ParametrosMudancas, Query()], con: Conexao) -> PaginaMudancas:
+    """Inclusões, alterações, remoções e reativações, da mais antiga para a mais nova.
+
+    Para acompanhar: guarde o `proximo_cursor` da última página e volte com ele depois.
+    A carga inicial de cada tabela não gera mudanças (é o ponto de partida do histórico).
+    """
+    tabela_id = None if params.tabela is None else (await _tabela(con, params.tabela)).id
+    desde = params.desde
+    if desde is not None and desde.tzinfo is None:
+        desde = desde.replace(tzinfo=UTC)
+    apos = cursor.decodificar_evento(params.cursor) if params.cursor else None
+    linhas = await consultas.mudancas(con, desde, tabela_id, params.tipo, apos, params.limite + 1)
+    tem_mais = len(linhas) > params.limite
+    linhas = linhas[: params.limite]
+    return PaginaMudancas(
+        itens=[
+            Mudanca(
+                ocorrido_em=linha.ocorrido_em,
+                tabela=linha.tabela,
+                codigo=linha.codigo,
+                tipo=linha.tipo,
+                campos_alterados=linha.campos_alterados,
+                antes=linha.antes,
+                depois=linha.depois,
+                carga_id=linha.carga_id,
+            )
+            for linha in linhas
+        ],
+        proximo_cursor=cursor.codificar_evento(linhas[-1].ocorrido_em, linhas[-1].id)
+        if tem_mais
+        else None,
+    )
 
 
 async def _buscar(

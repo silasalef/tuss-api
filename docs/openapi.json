@@ -378,6 +378,140 @@
         ]
       }
     },
+    "/v1/mudancas": {
+      "get": {
+        "summary": "Feed de mudanças publicadas",
+        "description": "Inclusões, alterações, remoções e reativações, da mais antiga para a mais nova.\n\nPara acompanhar: guarde o `proximo_cursor` da última página e volte com ele depois.\nA carga inicial de cada tabela não gera mudanças (é o ponto de partida do histórico).",
+        "operationId": "mudancas_v1_mudancas_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "desde",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "A partir deste momento (AAAA-MM-DD ou data e hora; sem fuso = UTC)",
+              "examples": [
+                "2026-09-01"
+              ],
+              "title": "Desde"
+            },
+            "description": "A partir deste momento (AAAA-MM-DD ou data e hora; sem fuso = UTC)"
+          },
+          {
+            "name": "tabela",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 20
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "`tuss-22` ou só `22`",
+              "title": "Tabela"
+            },
+            "description": "`tuss-22` ou só `22`"
+          },
+          {
+            "name": "tipo",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "incluido",
+                    "alterado",
+                    "removido",
+                    "reativado"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Tipo"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Valor de `proximo_cursor` da página anterior",
+              "title": "Cursor"
+            },
+            "description": "Valor de `proximo_cursor` da página anterior"
+          },
+          {
+            "name": "limite",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "description": "Itens por página",
+              "default": 50,
+              "title": "Limite"
+            },
+            "description": "Itens por página"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaginaMudancas"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Tabela ou código não encontrado"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/health/live": {
       "get": {
         "tags": [
@@ -633,6 +767,66 @@
         ],
         "title": "ConceitoDetalhe"
       },
+      "ConteudoConceito": {
+        "properties": {
+          "descricao": {
+            "type": "string",
+            "title": "Descricao"
+          },
+          "inicio_vigencia": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inicio Vigencia"
+          },
+          "fim_vigencia": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fim Vigencia"
+          },
+          "fim_implantacao": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fim Implantacao"
+          },
+          "atributos": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Atributos"
+          }
+        },
+        "type": "object",
+        "required": [
+          "descricao",
+          "inicio_vigencia",
+          "fim_vigencia",
+          "fim_implantacao",
+          "atributos"
+        ],
+        "title": "ConteudoConceito"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -753,6 +947,94 @@
         ],
         "title": "ListaTabelas"
       },
+      "Mudanca": {
+        "properties": {
+          "ocorrido_em": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Ocorrido Em",
+            "description": "Quando a mudança foi publicada na nossa base"
+          },
+          "tabela": {
+            "type": "string",
+            "title": "Tabela",
+            "examples": [
+              "tuss-22"
+            ]
+          },
+          "codigo": {
+            "type": "string",
+            "title": "Codigo",
+            "examples": [
+              "10101012"
+            ]
+          },
+          "tipo": {
+            "type": "string",
+            "enum": [
+              "incluido",
+              "alterado",
+              "removido",
+              "reativado"
+            ],
+            "title": "Tipo"
+          },
+          "campos_alterados": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Campos Alterados",
+            "description": "Só em `alterado`; atributos extras aparecem como `atributos.<nome>`"
+          },
+          "antes": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ConteudoConceito"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Vazio em incluido e reativado"
+          },
+          "depois": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ConteudoConceito"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Vazio em removido"
+          },
+          "carga_id": {
+            "type": "integer",
+            "title": "Carga Id",
+            "description": "Carga que trouxe a mudança"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ocorrido_em",
+          "tabela",
+          "codigo",
+          "tipo",
+          "campos_alterados",
+          "antes",
+          "depois",
+          "carga_id"
+        ],
+        "title": "Mudanca"
+      },
       "PaginaConceitos": {
         "properties": {
           "tabela": {
@@ -811,6 +1093,35 @@
           "proximo_cursor"
         ],
         "title": "PaginaConceitos"
+      },
+      "PaginaMudancas": {
+        "properties": {
+          "itens": {
+            "items": {
+              "$ref": "#/components/schemas/Mudanca"
+            },
+            "type": "array",
+            "title": "Itens"
+          },
+          "proximo_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Proximo Cursor",
+            "description": "Passe em `cursor` para continuar; vazio = não há mais mudanças por ora"
+          }
+        },
+        "type": "object",
+        "required": [
+          "itens",
+          "proximo_cursor"
+        ],
+        "title": "PaginaMudancas"
       },
       "PedidoValidacao": {
         "properties": {
@@ -1223,6 +1534,22 @@
             ],
             "title": "Erro",
             "description": "Motivo, quando a carga falhou"
+          },
+          "incluidos": {
+            "type": "integer",
+            "title": "Incluidos"
+          },
+          "alterados": {
+            "type": "integer",
+            "title": "Alterados"
+          },
+          "removidos": {
+            "type": "integer",
+            "title": "Removidos"
+          },
+          "reativados": {
+            "type": "integer",
+            "title": "Reativados"
           }
         },
         "type": "object",
@@ -1231,7 +1558,11 @@
           "status",
           "iniciada_em",
           "finalizada_em",
-          "erro"
+          "erro",
+          "incluidos",
+          "alterados",
+          "removidos",
+          "reativados"
         ],
         "title": "UltimaCarga"
       },
