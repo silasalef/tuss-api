@@ -1,8 +1,8 @@
-# Serviços do tuss-api: banco, API e CLI. O worker entra na Fase 4.
+# Serviços do tuss-api: banco, API, worker (coleta diária) e CLI.
 #
 # Uso:
 #   cp .env.example .env   # e troque as senhas
-#   docker compose up -d --build                          # sobe o banco e a API
+#   docker compose up -d --build                          # sobe o banco, a API e o worker
 #   docker compose run --rm --build tuss alembic upgrade head   # aplica as migrations
 #   docker compose run --rm tuss tuss importar /dados/arquivo.json  # arquivo em ./dados
 #   docker compose run --rm tuss tuss --help              # qualquer comando do CLI
@@ -84,6 +84,34 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+  # Coleta diária pela API da ANS (3 h em Brasília). Conecta com o papel `ingestao`.
+  # Nenhuma porta: só faz requisições para fora (ANS e heartbeat).
+  worker:
+    build: .
+    image: tuss-api:local
+    restart: unless-stopped
+    command: ["tuss", "worker"]
+    environment:
+      TUSS_DB_SENHA_INGESTAO: ${TUSS_DB_SENHA_INGESTAO:?defina TUSS_DB_SENHA_INGESTAO no .env}
+      TUSS_HEARTBEAT_URL: ${TUSS_HEARTBEAT_URL:-}
+    volumes:
+      - snapshots:/var/lib/tuss/snapshots # cada página recebida da ANS, como veio
+    depends_on:
+      postgres:
+        condition: service_healthy
+    mem_limit: 256m
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 30s # tempo para registrar a parada; coleta completa retoma depois
     logging:
       driver: json-file
       options:

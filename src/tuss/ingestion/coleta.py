@@ -54,7 +54,7 @@ class ResultadoColeta:
     paginas_lidas: int
     contagem: Contagem | None = None
     total: int | None = None
-    motivo: str | None = None  # da retenção, ou por que parou
+    motivo: str | None = None  # da retenção, ou por que a coleta parou no meio
 
 
 async def coletar(
@@ -63,43 +63,66 @@ async def coletar(
     """Coleta a tabela. Sem `modo`: incremental se já tem carga publicada, senão completa."""
     engine = criar_engine(config, PAPEL_INGESTAO)
     try:
-        carga_id, modo, ultima_pagina = await _abrir_ou_retomar(engine, tabela, modo)
-        try:
-            if modo == "completa":
-                lidas, parou = await _ler_tudo(
-                    engine, cliente, config, carga_id, tabela, ultima_pagina
+        async with engine.connect() as trava:
+            if not await _pegar_trava_da_coleta(trava, tabela):
+                raise ColetaRecusada(f"outra coleta de {tabela} está rodando agora")
+            try:
+                return await _coletar(engine, tabela, cliente, config, modo)
+            finally:
+                await trava.execute(
+                    text("SELECT pg_advisory_unlock(hashtext(:k))"), {"k": "coleta:" + tabela}
                 )
-            else:
-                lidas, parou = await _ler_o_topo(engine, cliente, config, carga_id, tabela)
-        except FonteIndisponivel as exc:
-            if modo == "completa":  # fica em andamento: a próxima execução retoma
-                return ResultadoColeta(carga_id, tabela, modo, "em_andamento", 0, motivo=str(exc))
-            await _marcar_falha(engine, carga_id, exc)
-            raise
-        except Exception as exc:
-            await _marcar_falha(engine, carga_id, exc)
-            raise
-        if parou is not None:
-            return ResultadoColeta(carga_id, tabela, modo, "em_andamento", lidas, motivo=parou)
-        async with engine.begin() as con:
-            await travar(con, tabela)
-            tabela_id = await _tabela_id(con, tabela)
-            await _registrar_assinatura(con, carga_id)
-            publicado = await publicar(
-                con, carga_id, tabela_id, tabela, parcial=modo == "incremental"
-            )
-        return ResultadoColeta(
-            carga_id,
-            tabela,
-            modo,
-            publicado.status,
-            lidas,
-            publicado.contagem,
-            publicado.total,
-            publicado.motivo_retencao,
-        )
     finally:
         await engine.dispose()
+
+
+async def _pegar_trava_da_coleta(con: AsyncConnection, tabela: str) -> bool:
+    """Trava que dura a coleta inteira (horas), numa conexão só dela.
+
+    Chave diferente da trava de publicação (`travar`), que é por transação: as duas
+    convivem sem uma esperar pela outra.
+    """
+    pegou: bool = (
+        await con.execute(
+            text("SELECT pg_try_advisory_lock(hashtext(:k))"), {"k": "coleta:" + tabela}
+        )
+    ).scalar_one()
+    await con.commit()
+    return pegou
+
+
+async def _coletar(
+    engine: AsyncEngine, tabela: str, cliente: ClienteANS, config: Config, modo: Modo | None
+) -> ResultadoColeta:
+    carga_id, modo, ultima_pagina = await _abrir_ou_retomar(engine, tabela, modo)
+    try:
+        if modo == "completa":
+            lidas = await _ler_tudo(engine, cliente, config, carga_id, tabela, ultima_pagina)
+        else:
+            lidas = await _ler_o_topo(engine, cliente, config, carga_id, tabela)
+    except FonteIndisponivel as exc:
+        if modo == "completa":  # fica em andamento: a próxima execução retoma
+            return ResultadoColeta(carga_id, tabela, modo, "em_andamento", 0, motivo=str(exc))
+        await _marcar_falha(engine, carga_id, exc)
+        raise
+    except Exception as exc:
+        await _marcar_falha(engine, carga_id, exc)
+        raise
+    async with engine.begin() as con:
+        await travar(con, tabela)
+        tabela_id = await _tabela_id(con, tabela)
+        await _registrar_assinatura(con, carga_id)
+        publicado = await publicar(con, carga_id, tabela_id, tabela, parcial=modo == "incremental")
+    return ResultadoColeta(
+        carga_id,
+        tabela,
+        modo,
+        publicado.status,
+        lidas,
+        publicado.contagem,
+        publicado.total,
+        publicado.motivo_retencao,
+    )
 
 
 async def _abrir_ou_retomar(
@@ -130,7 +153,12 @@ async def _abrir_ou_retomar(
                 )
             if pendente.origem == "api" and pendente.modo == "completa" and modo != "incremental":
                 return pendente.id, "completa", pendente.checkpoint or 0
-            raise ColetaRecusada(f"{tabela} já tem a carga {pendente.id} em andamento")
+            if pendente.origem == "api" and pendente.modo == "incremental":
+                # Quem segura a trava da coleta somos nós: esta ficou para trás (processo
+                # parado no meio). Incremental não se retoma; começa de novo.
+                await _abandonar(con, pendente.id)
+            else:
+                raise ColetaRecusada(f"{tabela} já tem a carga {pendente.id} em andamento")
         publicada: int | None = (
             await con.execute(
                 text("SELECT carga_atual_id FROM tabela_tuss WHERE id = :t"), {"t": tabela_id}
@@ -159,8 +187,8 @@ async def _ler_tudo(
     carga_id: int,
     tabela: str,
     ultima_pagina: int,
-) -> tuple[int, str | None]:
-    """Lê da página seguinte ao checkpoint até a última. Devolve (lidas, motivo de parar)."""
+) -> int:
+    """Lê da página seguinte ao checkpoint até a última. Devolve quantas leu."""
     lidas = 0
     numero = ultima_pagina + 1
     total_esperado = await _total_paginas_da_carga(engine, carga_id)
@@ -178,13 +206,13 @@ async def _ler_tudo(
         await _gravar_pagina(engine, config, carga_id, tabela, pagina)
         lidas += 1
         if numero >= pagina.total_paginas:
-            return lidas, None
+            return lidas
         numero += 1
 
 
 async def _ler_o_topo(
     engine: AsyncEngine, cliente: ClienteANS, config: Config, carga_id: int, tabela: str
-) -> tuple[int, str | None]:
+) -> int:
     """Lê do começo até 2 páginas seguidas sem novidade (ou até o fim da tabela)."""
     sem_novidade = 0
     numero = 1
@@ -196,7 +224,7 @@ async def _ler_o_topo(
         else:
             sem_novidade += 1
         if sem_novidade >= PAGINAS_CONHECIDAS_PARA_PARAR or numero >= pagina.total_paginas:
-            return numero, None
+            return numero
         numero += 1
 
 
@@ -302,6 +330,17 @@ async def _tabela_id(con: AsyncConnection, tabela: str) -> int:
         await con.execute(text("SELECT id FROM tabela_tuss WHERE codigo = :t"), {"t": tabela})
     ).scalar_one()
     return valor
+
+
+async def _abandonar(con: AsyncConnection, carga_id: int) -> None:
+    await con.execute(
+        text(
+            "UPDATE carga SET status = 'falhou', erro = 'interrompida no meio; refeita',"
+            " finalizada_em = now() WHERE id = :c"
+        ),
+        {"c": carga_id},
+    )
+    await con.execute(text("DELETE FROM stg_conceito WHERE carga_id = :c"), {"c": carga_id})
 
 
 async def _marcar_falha(engine: AsyncEngine, carga_id: int, exc: Exception) -> None:

@@ -132,6 +132,28 @@ def coletar(
         raise typer.Exit(3)
 
 
+@app.command()
+def worker() -> None:
+    """Roda o worker: um ciclo de coleta por dia, na hora TUSS_WORKER_HORA_UTC."""
+    from tuss import worker as w
+    from tuss.log import configurar as configurar_log
+
+    configurar_log()
+    w.main(Config())
+
+
+@app.command()
+def ciclo() -> None:
+    """Roda um ciclo de coleta agora (catálogo e todas as tabelas), sem esperar a hora."""
+    from tuss import worker as w
+    from tuss.log import configurar as configurar_log
+
+    configurar_log()
+    resultados = asyncio.run(w.rodar_ciclo(Config()))
+    for r in resultados:
+        typer.echo(f"{r.tabela:8} {r.status:13} {r.detalhe}")
+
+
 CargaId = Annotated[int, typer.Argument(help="Número da carga retida")]
 SemPerguntar = Annotated[bool, typer.Option("--sim", help="Não pede confirmação")]
 

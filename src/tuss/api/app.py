@@ -9,11 +9,9 @@ e nunca chama a ANS. Sem nenhum token configurado, ela nem sobe.
 from __future__ import annotations
 
 import json
-import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-import structlog
 from fastapi import FastAPI, HTTPException, Request
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
@@ -22,6 +20,7 @@ from tuss.api import erros, limites
 from tuss.api.schemas import Saude
 from tuss.api.v1 import rotas
 from tuss.config import PAPEL_API, Config
+from tuss.log import configurar as configurar_log
 
 DESCRICAO = """
 Consulta às tabelas TUSS da ANS com histórico de versões e vigência por data.
@@ -34,7 +33,7 @@ Problem Details (RFC 9457) e trazem um `request_id` para rastrear no log.
 def criar_app(config: Config | None = None) -> FastAPI:
     config = config or Config()
     hashes_tokens = config.hashes_tokens()  # falha aqui, antes de subir, se não houver token
-    _configurar_log()
+    configurar_log()
 
     @asynccontextmanager
     async def ciclo_de_vida(app: FastAPI) -> AsyncIterator[None]:
@@ -82,20 +81,6 @@ def criar_app(config: Config | None = None) -> FastAPI:
         return Saude(status="ok")
 
     return app
-
-
-def _configurar_log() -> None:
-    """Uma linha JSON por evento, com data em UTC."""
-    structlog.configure(
-        processors=[
-            structlog.processors.add_log_level,
-            structlog.processors.TimeStamper(fmt="iso", utc=True),
-            structlog.processors.format_exc_info,
-            structlog.processors.JSONRenderer(ensure_ascii=False),
-        ],
-        wrapper_class=structlog.make_filtering_bound_logger(logging.INFO),
-        cache_logger_on_first_use=True,
-    )
 
 
 def openapi_json() -> str:

@@ -8,6 +8,8 @@ from typing import Any
 import httpx
 import pytest
 from conftest import BancoDeTeste
+from sqlalchemy import pool, text
+from sqlalchemy.ext.asyncio import create_async_engine
 
 from tuss.config import PAPEL_API, PAPEL_INGESTAO, Config
 from tuss.ingestion.coleta import ColetaRecusada, DadosInvalidos, coletar
@@ -175,3 +177,32 @@ async def test_dado_invalido_da_ans_falha_alto(
     assert await _um(bd, "SELECT status FROM carga") == "falhou"
     assert await _um(bd, "SELECT count(*) FROM stg_conceito", PAPEL_INGESTAO) == 0
     assert await _um(bd, "SELECT count(*) FROM conceito") == 0
+
+
+async def test_duas_coletas_da_mesma_tabela_ao_mesmo_tempo(config: Config) -> None:
+    engine = create_async_engine(config.url_banco(PAPEL_INGESTAO), poolclass=pool.NullPool)
+    try:
+        async with engine.connect() as outra:  # como se outra coleta estivesse rodando
+            await outra.execute(text("SELECT pg_advisory_lock(hashtext('coleta:tuss-22'))"))
+            with pytest.raises(ColetaRecusada, match="outra coleta de tuss-22"):
+                await _coletar(ANSFalsa(REGISTROS), config)
+    finally:
+        await engine.dispose()
+    # Solta a trava ao terminar: a próxima coleta roda.
+    assert (await _coletar(ANSFalsa(REGISTROS), config)).status == "publicada"
+
+
+async def test_incremental_interrompida_e_refeita(bd: BancoDeTeste, config: Config) -> None:
+    await _coletar(ANSFalsa(REGISTROS), config)
+    # Processo parado no meio de uma incremental: a carga ficou em andamento.
+    await bd.executar(
+        PAPEL_INGESTAO,
+        "INSERT INTO carga (tabela_id, origem, modo, checkpoint)"
+        " VALUES (1, 'api', 'incremental', 1)",
+    )
+
+    resultado = await _coletar(ANSFalsa(REGISTROS), config)
+
+    assert (resultado.carga_id, resultado.status) == (3, "sem_mudanca")
+    abandonada = (await bd.executar(PAPEL_API, "SELECT status, erro FROM carga WHERE id = 2"))[0]
+    assert tuple(abandonada) == ("falhou", "interrompida no meio; refeita")

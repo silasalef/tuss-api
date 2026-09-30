@@ -189,7 +189,7 @@ CI no GitHub Actions: ruff, mypy, testes, gitleaks e pip-audit; merge só com tu
 | Acesso a dados | SQLAlchemy 2 (async) + asyncpg, Alembic | Migrations versionadas |
 | Rate limit | Limitador próprio em memória (~30 linhas) | Limite diferente para busca e consulta na mesma rota; sem Redis enquanto houver um processo |
 | Cliente HTTP da fonte | httpx + tenacity | Timeout, retry com backoff e jitter |
-| Agenda do worker | APScheduler | Sem broker nem fila extra |
+| Agenda do worker | Laço simples em `worker.py` (esperar a hora, rodar, repetir) | Uma tarefa só, uma vez por dia; o próprio ciclo retoma o que ficou pela metade. O APScheduler foi descartado na Fase 4: seria uma dependência a mais sem ganho |
 | CLI | Typer | Importar, aprovar e reprocessar à mão |
 
 ```

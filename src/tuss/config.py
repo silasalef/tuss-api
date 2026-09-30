@@ -9,7 +9,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from pydantic import SecretStr
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy import URL
 
@@ -40,6 +40,10 @@ class Config(BaseSettings):
     # Chamadas por minuto, por token. Só o teste de carga (numa cópia temporária da API) muda isto.
     limite_consultas_por_minuto: int = 60
     limite_buscas_por_minuto: int = 20
+    # Worker: hora (UTC) do ciclo diário; 6 h UTC = 3 h em Brasília, sem horário de verão.
+    worker_hora_utc: int = Field(default=6, ge=0, le=23)
+    # Endereço de heartbeat (ex.: healthchecks.io) avisado ao fim de cada ciclo; vazio = não avisa.
+    heartbeat_url: str = ""
 
     def url_banco(self, papel: str) -> URL:
         """Endereço de conexão (driver asyncpg) para um dos três papéis."""
