@@ -24,7 +24,8 @@ COPY src ./src
 RUN uv sync --locked --no-dev
 
 # Usuário sem privilégios: o container não roda como root.
-RUN useradd --system --uid 10001 --no-create-home tuss
+RUN useradd --system --uid 10001 --no-create-home tuss \
+    && mkdir -p /var/lib/tuss/snapshots && chown tuss /var/lib/tuss/snapshots
 USER tuss
 
 ENTRYPOINT []

@@ -31,6 +31,7 @@ docker compose run --rm --build tuss alembic upgrade head  # cria as tabelas
 uv run pytest                                  # todos os testes (os de integração sobem um Postgres temporário)
 uv run pytest -m "not integracao"             # só os rápidos, sem Docker
 uv run tuss inspecionar caminho/do/arquivo.zip # valida um arquivo baixado do portal da ANS
+docker compose run --rm tuss tuss importar /dados/arquivo.json  # importa (arquivo em ./dados)
 ```
 
 ## Fonte dos dados

@@ -6,6 +6,8 @@ mensagem clara em vez de tentar conectar sem senha.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy import URL
@@ -30,6 +32,8 @@ class Config(BaseSettings):
     db_senha_dono: SecretStr | None = None
     db_senha_ingestao: SecretStr | None = None
     db_senha_api: SecretStr | None = None
+    # Cópia de cada arquivo importado, como veio da ANS (volume `snapshots` no compose.yaml)
+    snapshots_dir: Path = Path("/var/lib/tuss/snapshots")
 
     def url_banco(self, papel: str) -> URL:
         """Endereço de conexão (driver asyncpg) para um dos três papéis."""

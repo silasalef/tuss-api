@@ -4,6 +4,7 @@
 #   cp .env.example .env   # e troque as senhas
 #   docker compose up -d                                  # sobe o banco
 #   docker compose run --rm --build tuss alembic upgrade head   # aplica as migrations
+#   docker compose run --rm tuss tuss importar /dados/arquivo.json  # arquivo em ./dados
 #   docker compose run --rm tuss tuss --help              # qualquer comando do CLI
 #   docker compose exec postgres psql -U tuss             # abrir o banco
 #
@@ -59,6 +60,9 @@ services:
       TUSS_DB_SENHA_DONO: ${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}
       TUSS_DB_SENHA_INGESTAO: ${TUSS_DB_SENHA_INGESTAO:?defina TUSS_DB_SENHA_INGESTAO no .env}
       TUSS_DB_SENHA_API: ${TUSS_DB_SENHA_API:?defina TUSS_DB_SENHA_API no .env}
+    volumes:
+      - ./dados:/dados:ro # arquivos baixados do portal (só leitura)
+      - snapshots:/var/lib/tuss/snapshots # cópia de cada arquivo importado
     depends_on:
       postgres:
         condition: service_healthy
@@ -71,3 +75,4 @@ services:
 
 volumes:
   pgdata:
+  snapshots:
