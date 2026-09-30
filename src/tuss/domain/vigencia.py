@@ -23,6 +23,8 @@ from datetime import UTC, date, datetime
 from typing import Literal, Protocol
 
 Criterio = Literal["oficial", "observado"]
+# Por que está (ou não está) vigente. `inexistente`: o código nunca apareceu nas cargas.
+Motivo = Literal["vigente", "antes_do_inicio", "apos_o_fim", "fora_da_lista", "inexistente"]
 
 
 class Versao(Protocol):
@@ -44,6 +46,7 @@ class Situacao:
     criterio: Criterio
     inicio: date | None  # período considerado: oficial ou observado (dias em UTC)
     fim: date | None  # vazio = aberto
+    motivo: Motivo
 
 
 def criterio(inicio_vigencia: date | None) -> Criterio:
@@ -72,28 +75,44 @@ def versao_em[V: Versao](versoes: Sequence[V], d: date) -> V | None:
 
 
 def situacao(versoes: Sequence[Versao], d: date) -> Situacao:
-    """Se o código estava vigente em `d` e por qual critério."""
+    """Se o código estava vigente em `d`, por qual critério e, se não, por quê."""
     versao = versao_em(versoes, d)
     ordenadas = sorted(versoes, key=lambda v: v.publicado_de)
     if versao is None:
-        # Fora da lista em D: quem decide é a saída observada, não a data da ANS.
         if not ordenadas:
-            return Situacao(False, "observado", None, None)
-        ultima = ordenadas[-1]
+            return Situacao(False, "observado", None, None, "inexistente")
+        # Fora da lista em D: quem decide é a saída observada, não a data da ANS.
+        # O período é o da última versão antes de D (não a mais nova: o código pode
+        # ter voltado depois de D).
+        saiu = [v for v in ordenadas if _dia(v.publicado_de) <= d][-1]
         return Situacao(
             False,
             "observado",
-            ultima.inicio_vigencia or _dia(ordenadas[0].publicado_de),
-            _dia_opcional(ultima.publicado_ate),
+            saiu.inicio_vigencia or _dia(ordenadas[0].publicado_de),
+            _dia_opcional(saiu.publicado_ate),
+            "fora_da_lista",
         )
     if versao.inicio_vigencia is not None:
         inicio, fim = versao.inicio_vigencia, versao.fim_vigencia
-        vigente = inicio <= d and (fim is None or d <= fim)
-        return Situacao(vigente, "oficial", inicio, fim)
+        return Situacao(
+            inicio <= d and (fim is None or d <= fim),
+            "oficial",
+            inicio,
+            fim,
+            _motivo(d, inicio, fim),
+        )
     # Observado: da primeira vez que vimos o código até a saída da lista (se saiu).
     inicio_obs = _dia(ordenadas[0].publicado_de)
     fim_obs = _dia_opcional(ordenadas[-1].publicado_ate)
-    return Situacao(inicio_obs <= d, "observado", inicio_obs, fim_obs)
+    return Situacao(inicio_obs <= d, "observado", inicio_obs, fim_obs, _motivo(d, inicio_obs, None))
+
+
+def _motivo(d: date, inicio: date, fim: date | None) -> Motivo:
+    if d < inicio:
+        return "antes_do_inicio"
+    if fim is not None and d > fim:
+        return "apos_o_fim"
+    return "vigente"
 
 
 def _dia(momento: datetime) -> date:

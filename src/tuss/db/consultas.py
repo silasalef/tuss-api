@@ -121,6 +121,24 @@ async def versoes(con: AsyncConnection, tabela_id: int, codigo: str) -> list[Row
     return list(resultado)
 
 
+async def versoes_de_varios(
+    con: AsyncConnection, tabela_id: int, codigos: list[str]
+) -> list[Row[Any]]:
+    """Como `versoes`, para vários códigos de uma vez (em ordem de código e publicação)."""
+    resultado = await con.execute(
+        text("""
+        SELECT c.codigo, v.descricao, v.inicio_vigencia, v.fim_vigencia, v.fim_implantacao,
+               v.atributos, v.carga_id, v.publicado_de, v.publicado_ate
+        FROM conceito c
+        JOIN conceito_versao v ON v.conceito_id = c.id
+        WHERE c.tabela_id = :tabela AND c.codigo = ANY(CAST(:codigos AS text[]))
+        ORDER BY c.codigo, v.publicado_de
+        """),
+        {"tabela": tabela_id, "codigos": codigos},
+    )
+    return list(resultado)
+
+
 async def listar_vigentes(
     con: AsyncConnection, tabela_id: int, em: date, apos: str | None, limite: int
 ) -> list[Row[Any]]:

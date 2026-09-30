@@ -46,9 +46,14 @@ class Limitador:
 
 async def limitar(request: Request) -> None:
     """Dependência das rotas /v1, depois do token: conta por token e por tipo de chamada."""
-    busca = "q" in request.query_params
     limites: tuple[int, int] = request.app.state.limites_por_minuto  # (consultas, buscas)
-    tipo, limite = ("busca", limites[1]) if busca else ("consulta", limites[0])
+    # Busca e validação em lote custam mais ao banco: cota menor, cada uma com a sua.
+    if request.method == "POST":
+        tipo, limite = "validação", limites[1]
+    elif "q" in request.query_params:
+        tipo, limite = "busca", limites[1]
+    else:
+        tipo, limite = "consulta", limites[0]
     limitador: Limitador = request.app.state.limitador
     espera = limitador.registrar(f"{request.state.token_hash}:{tipo}", limite)
     if espera is not None:

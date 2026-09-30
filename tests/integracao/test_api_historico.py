@@ -190,3 +190,71 @@ async def test_vigente_em_exclui_quem_estava_fora_da_lista(cenario: httpx.AsyncC
 async def test_vigente_em_nao_se_combina_com_busca(cenario: httpx.AsyncClient) -> None:
     r = await _get(cenario, "/v1/tabelas/22/conceitos", q="consulta", vigente_em="2026-09-22")
     assert r.status_code == 400
+
+
+# Validação em lote
+
+
+async def _validar(cliente: httpx.AsyncClient, itens: list[dict[str, Any]]) -> httpx.Response:
+    return await cliente.post("/v1/validacoes", json={"itens": itens}, headers=auth())
+
+
+async def test_validacao_diz_se_estava_vigente_e_por_que(cenario: httpx.AsyncClient) -> None:
+    pedido = [
+        {"tabela": "22", "codigo": ALTERADO, "data": "2026-09-15"},
+        {"tabela": "tuss-22", "codigo": ALTERADO, "data": "2026-07-01"},
+        {"tabela": "22", "codigo": REMOVIDO, "data": "2026-09-22"},
+        {"tabela": "22", "codigo": INCLUIDO, "data": "2026-09-22"},
+        {"tabela": "22", "codigo": "00000000", "data": "2026-09-22"},
+        {"tabela": "99", "codigo": ALTERADO, "data": "2026-09-22"},
+    ]
+    r = await _validar(cenario, pedido)
+    assert r.status_code == 200
+    corpo = r.json()
+    assert (corpo["vigentes"], corpo["nao_vigentes"]) == (2, 4)
+    resumo = [(i["tabela"], i["codigo"], i["vigente"], i["motivo"]) for i in corpo["itens"]]
+    assert resumo == [
+        ("tuss-22", ALTERADO, True, "vigente"),
+        ("tuss-22", ALTERADO, False, "antes_do_inicio"),
+        ("tuss-22", REMOVIDO, False, "fora_da_lista"),
+        ("tuss-22", INCLUIDO, True, "vigente"),
+        ("tuss-22", "00000000", False, "inexistente"),
+        ("99", ALTERADO, False, "tabela_inexistente"),
+    ]
+    primeiro, _, removido, incluido, inexistente, _ = corpo["itens"]
+    assert primeiro["criterio"] == "oficial"
+    assert primeiro["periodo"] == {"inicio": "2026-08-01", "fim": None}
+    assert primeiro["carga_id"] == 3
+    # Fora da lista: o período é o observado, até o dia em que o código saiu.
+    assert (removido["criterio"], removido["periodo"]["fim"]) == ("observado", "2026-09-20")
+    assert removido["descricao"] is None
+    assert incluido["descricao"] == "Código de teste"
+    assert (inexistente["criterio"], inexistente["periodo"]) == (None, None)
+
+
+async def test_validacao_so_aceita_tabela_codigo_e_data(cenario: httpx.AsyncClient) -> None:
+    item = {"tabela": "22", "codigo": ALTERADO, "data": "2026-09-15", "beneficiario": "Fulano"}
+    r = await _validar(cenario, [item])
+    assert r.status_code == 422
+    assert r.headers["content-type"] == "application/problem+json"
+
+
+@pytest.mark.parametrize("quantidade", [0, 101])
+async def test_validacao_aceita_de_1_a_100_itens(
+    cenario: httpx.AsyncClient, quantidade: int
+) -> None:
+    item = {"tabela": "22", "codigo": ALTERADO, "data": "2026-09-15"}
+    assert (await _validar(cenario, [item] * quantidade)).status_code == 422
+    assert (await _validar(cenario, [item] * 100)).status_code == 200
+
+
+async def test_validacao_tem_limite_proprio_por_minuto(cenario: httpx.AsyncClient) -> None:
+    item = {"tabela": "22", "codigo": ALTERADO, "data": "2026-09-15"}
+    for _ in range(20):
+        assert (await _validar(cenario, [item])).status_code == 200
+    r = await _validar(cenario, [item])
+    assert r.status_code == 429
+    assert "validação" in r.json()["detail"]
+    assert "Retry-After" in r.headers
+    # Consultas comuns continuam liberadas: cada tipo tem a sua cota.
+    assert (await _get(cenario, f"/v1/tabelas/22/conceitos/{ALTERADO}")).status_code == 200

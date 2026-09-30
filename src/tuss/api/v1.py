@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections import defaultdict
 from datetime import UTC, date, datetime
 from typing import Annotated, Any
 
@@ -20,6 +21,10 @@ from tuss.api.schemas import (
     ListaTabelas,
     PaginaConceitos,
     ParametrosLista,
+    PedidoValidacao,
+    Periodo,
+    ResultadoValidacao,
+    ResultadoValidacoes,
     Status,
     StatusTabela,
     Tabela,
@@ -213,6 +218,66 @@ async def historico(tabela: CodigoTabela, codigo: CodigoConceito, con: Conexao) 
     )
 
 
+@rotas.post("/validacoes", summary="Confere se códigos estavam vigentes em datas")
+async def validar(pedido: PedidoValidacao, con: Conexao) -> ResultadoValidacoes:
+    """Até 100 itens de tabela + código + data; para cada um, se estava vigente e por quê.
+
+    Um item com problema (tabela ou código que não existe) não derruba os outros: vem
+    com `vigente: false` e o `motivo`. Conta no limite de buscas por minuto.
+    """
+    tabelas: dict[str, Row[Any] | None] = {}
+    for informada in {item.tabela for item in pedido.itens}:
+        tabelas[informada] = await _resolver_tabela(con, informada)
+
+    # Uma consulta por tabela, com todos os códigos pedidos dela.
+    codigos_por_tabela: dict[int, set[str]] = defaultdict(set)
+    for item in pedido.itens:
+        t = tabelas[item.tabela]
+        if t is not None:
+            codigos_por_tabela[t.id].add(item.codigo)
+    versoes: dict[tuple[int, str], list[Row[Any]]] = defaultdict(list)
+    for tabela_id, codigos in codigos_por_tabela.items():
+        for linha in await consultas.versoes_de_varios(con, tabela_id, sorted(codigos)):
+            versoes[(tabela_id, linha.codigo)].append(linha)
+
+    itens: list[ResultadoValidacao] = []
+    for item in pedido.itens:
+        t = tabelas[item.tabela]
+        if t is None:
+            itens.append(
+                ResultadoValidacao(
+                    tabela=item.tabela,
+                    codigo=item.codigo,
+                    data=item.data,
+                    vigente=False,
+                    motivo="tabela_inexistente",
+                    criterio=None,
+                    periodo=None,
+                    descricao=None,
+                    carga_id=None,
+                )
+            )
+            continue
+        do_codigo = versoes[(t.id, item.codigo)]
+        s = situacao(do_codigo, item.data)
+        versao = versao_em(do_codigo, item.data)
+        itens.append(
+            ResultadoValidacao(
+                tabela=t.codigo,
+                codigo=item.codigo,
+                data=item.data,
+                vigente=s.vigente,
+                motivo=s.motivo,
+                criterio=None if s.motivo == "inexistente" else s.criterio,
+                periodo=None if s.motivo == "inexistente" else Periodo(inicio=s.inicio, fim=s.fim),
+                descricao=None if versao is None else versao.descricao,
+                carga_id=t.carga_atual_id,
+            )
+        )
+    vigentes = sum(item.vigente for item in itens)
+    return ResultadoValidacoes(vigentes=vigentes, nao_vigentes=len(itens) - vigentes, itens=itens)
+
+
 async def _buscar(
     con: AsyncConnection, t: Row[Any], q: str, cursor_informado: str | None, limite: int
 ) -> PaginaConceitos:
@@ -236,11 +301,15 @@ async def _buscar(
 
 async def _tabela(con: AsyncConnection, informada: str) -> Row[Any]:
     """Aceita `tuss-22` ou `22`. Fora do catálogo (ou formato estranho) = 404."""
-    achado = _RE_TABELA.match(informada.strip().lower())
-    linha = await consultas.tabela(con, f"tuss-{achado.group(1)}") if achado else None
+    linha = await _resolver_tabela(con, informada)
     if linha is None:
         raise HTTPException(404, f"tabela {informada} não encontrada")
     return linha
+
+
+async def _resolver_tabela(con: AsyncConnection, informada: str) -> Row[Any] | None:
+    achado = _RE_TABELA.match(informada.strip().lower())
+    return await consultas.tabela(con, f"tuss-{achado.group(1)}") if achado else None
 
 
 def _conceito(linha: Row[Any]) -> Conceito:

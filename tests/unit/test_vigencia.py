@@ -55,22 +55,29 @@ def test_codigo_reativado_volta_a_ter_versao() -> None:
 
 def test_vigencia_oficial_usa_as_datas_da_ans() -> None:
     versao = V("v", _em(10), inicio_vigencia=date(2021, 3, 1), fim_vigencia=date(2026, 12, 31))
-    assert not situacao([versao], date(2021, 2, 28)).vigente
-    assert situacao([versao], date(2021, 3, 1)).vigente
+    assert situacao([versao], date(2021, 2, 28)).motivo == "antes_do_inicio"
+    assert situacao([versao], date(2021, 3, 1)).motivo == "vigente"
     assert situacao([versao], date(2026, 12, 31)).vigente  # o último dia ainda vale
-    assert not situacao([versao], date(2027, 1, 1)).vigente
+    assert situacao([versao], date(2027, 1, 1)).motivo == "apos_o_fim"
     s = situacao([versao], date(2024, 1, 1))
     assert (s.criterio, s.inicio, s.fim) == ("oficial", date(2021, 3, 1), date(2026, 12, 31))
 
 
 def test_removido_nao_esta_vigente_e_o_criterio_e_observado() -> None:
     s = situacao(HISTORICO, date(2026, 9, 26))
-    assert (s.vigente, s.criterio, s.inicio, s.fim) == (
+    assert (s.vigente, s.criterio, s.inicio, s.fim, s.motivo) == (
         False,
         "observado",
         date(2020, 1, 1),
         date(2026, 9, 25),
+        "fora_da_lista",
     )
+
+
+def test_fora_da_lista_mostra_a_saida_mesmo_que_o_codigo_tenha_voltado() -> None:
+    v3 = V("v3", _em(28))
+    s = situacao([*HISTORICO, v3], date(2026, 9, 26))
+    assert (s.vigente, s.motivo, s.fim) == (False, "fora_da_lista", date(2026, 9, 25))
 
 
 def test_sem_data_da_ans_vale_o_periodo_observado() -> None:
@@ -81,7 +88,8 @@ def test_sem_data_da_ans_vale_o_periodo_observado() -> None:
 
 
 def test_codigo_sem_versao() -> None:
-    assert not situacao([], date(2026, 9, 10)).vigente
+    s = situacao([], date(2026, 9, 10))
+    assert (s.vigente, s.motivo) == (False, "inexistente")
 
 
 @st.composite
@@ -114,3 +122,9 @@ def test_versao_escolhida_estava_publicada_no_dia(versoes: list[V], d: date) -> 
         assert escolhida.publicado_ate is None or d < escolhida.publicado_ate.date()
     else:
         assert escolhida == versoes[0]
+
+
+@given(versoes=_historicos(), d=st.dates(date(2000, 1, 1), date(2030, 12, 31)))
+def test_motivo_vigente_se_e_somente_se_vigente(versoes: list[V], d: date) -> None:
+    s = situacao(versoes, d)
+    assert s.vigente == (s.motivo == "vigente")

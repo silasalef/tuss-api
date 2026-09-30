@@ -11,7 +11,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from tuss.domain.vigencia import Criterio
+from tuss.domain.vigencia import Criterio, Motivo
 
 StatusCarga = Literal["em_andamento", "retida", "publicada", "sem_mudanca", "falhou"]
 
@@ -136,3 +136,53 @@ class ParametrosLista(BaseModel):
     )
     cursor: str | None = Field(None, description="Valor de `proximo_cursor` da página anterior")
     limite: int = Field(50, ge=1, le=200, description="Itens por página")
+
+
+class ItemValidacao(BaseModel):
+    # Só tabela, código e data: nenhum outro campo é aceito, para que ninguém mande
+    # dado de beneficiário por engano (LGPD).
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    tabela: str = Field(min_length=1, max_length=20, examples=["22"])
+    codigo: str = Field(min_length=1, max_length=40, examples=["10101012"])
+    data: date = Field(description="Data do atendimento (AAAA-MM-DD)", examples=["2026-09-01"])
+
+
+class PedidoValidacao(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    itens: list[ItemValidacao] = Field(min_length=1, max_length=100)
+
+
+class Periodo(BaseModel):
+    inicio: date | None
+    fim: date | None = Field(description="Vazio = período aberto")
+
+
+MotivoValidacao = Literal[Motivo, "tabela_inexistente"]
+
+
+class ResultadoValidacao(BaseModel):
+    tabela: str = Field(description="Como veio no pedido, ou normalizada (`tuss-22`)")
+    codigo: str
+    data: date
+    vigente: bool
+    motivo: MotivoValidacao = Field(
+        description=(
+            "vigente; antes_do_inicio e apos_o_fim (fora do período de vigência);"
+            " fora_da_lista (a ANS tinha retirado o código nessa data);"
+            " inexistente (código nunca visto nesta tabela); tabela_inexistente"
+        )
+    )
+    criterio: Criterio | None = Field(
+        description="oficial: datas da ANS; observado: período visto nas cargas"
+    )
+    periodo: Periodo | None = Field(description="Período de vigência considerado")
+    descricao: str | None = Field(description="Descrição do código como era na data")
+    carga_id: int | None = Field(description="Carga publicada que a API está servindo")
+
+
+class ResultadoValidacoes(BaseModel):
+    vigentes: int
+    nao_vigentes: int
+    itens: list[ResultadoValidacao] = Field(description="Na mesma ordem do pedido")

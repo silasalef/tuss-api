@@ -334,6 +334,50 @@
         }
       }
     },
+    "/v1/validacoes": {
+      "post": {
+        "summary": "Confere se códigos estavam vigentes em datas",
+        "description": "Até 100 itens de tabela + código + data; para cada um, se estava vigente e por quê.\n\nUm item com problema (tabela ou código que não existe) não derruba os outros: vem\ncom `vigente: false` e o `motivo`. Conta no limite de buscas por minuto.",
+        "operationId": "validar_v1_validacoes_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PedidoValidacao"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultadoValidacoes"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
     "/health/live": {
       "get": {
         "tags": [
@@ -654,6 +698,45 @@
         ],
         "title": "Historico"
       },
+      "ItemValidacao": {
+        "properties": {
+          "tabela": {
+            "type": "string",
+            "maxLength": 20,
+            "minLength": 1,
+            "title": "Tabela",
+            "examples": [
+              "22"
+            ]
+          },
+          "codigo": {
+            "type": "string",
+            "maxLength": 40,
+            "minLength": 1,
+            "title": "Codigo",
+            "examples": [
+              "10101012"
+            ]
+          },
+          "data": {
+            "type": "string",
+            "format": "date",
+            "title": "Data",
+            "description": "Data do atendimento (AAAA-MM-DD)",
+            "examples": [
+              "2026-09-01"
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "tabela",
+          "codigo",
+          "data"
+        ],
+        "title": "ItemValidacao"
+      },
       "ListaTabelas": {
         "properties": {
           "itens": {
@@ -728,6 +811,186 @@
           "proximo_cursor"
         ],
         "title": "PaginaConceitos"
+      },
+      "PedidoValidacao": {
+        "properties": {
+          "itens": {
+            "items": {
+              "$ref": "#/components/schemas/ItemValidacao"
+            },
+            "type": "array",
+            "maxItems": 100,
+            "minItems": 1,
+            "title": "Itens"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "itens"
+        ],
+        "title": "PedidoValidacao"
+      },
+      "Periodo": {
+        "properties": {
+          "inicio": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inicio"
+          },
+          "fim": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fim",
+            "description": "Vazio = período aberto"
+          }
+        },
+        "type": "object",
+        "required": [
+          "inicio",
+          "fim"
+        ],
+        "title": "Periodo"
+      },
+      "ResultadoValidacao": {
+        "properties": {
+          "tabela": {
+            "type": "string",
+            "title": "Tabela",
+            "description": "Como veio no pedido, ou normalizada (`tuss-22`)"
+          },
+          "codigo": {
+            "type": "string",
+            "title": "Codigo"
+          },
+          "data": {
+            "type": "string",
+            "format": "date",
+            "title": "Data"
+          },
+          "vigente": {
+            "type": "boolean",
+            "title": "Vigente"
+          },
+          "motivo": {
+            "type": "string",
+            "enum": [
+              "vigente",
+              "antes_do_inicio",
+              "apos_o_fim",
+              "fora_da_lista",
+              "inexistente",
+              "tabela_inexistente"
+            ],
+            "title": "Motivo",
+            "description": "vigente; antes_do_inicio e apos_o_fim (fora do período de vigência); fora_da_lista (a ANS tinha retirado o código nessa data); inexistente (código nunca visto nesta tabela); tabela_inexistente"
+          },
+          "criterio": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "oficial",
+                  "observado"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Criterio",
+            "description": "oficial: datas da ANS; observado: período visto nas cargas"
+          },
+          "periodo": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Periodo"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Período de vigência considerado"
+          },
+          "descricao": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Descricao",
+            "description": "Descrição do código como era na data"
+          },
+          "carga_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Carga Id",
+            "description": "Carga publicada que a API está servindo"
+          }
+        },
+        "type": "object",
+        "required": [
+          "tabela",
+          "codigo",
+          "data",
+          "vigente",
+          "motivo",
+          "criterio",
+          "periodo",
+          "descricao",
+          "carga_id"
+        ],
+        "title": "ResultadoValidacao"
+      },
+      "ResultadoValidacoes": {
+        "properties": {
+          "vigentes": {
+            "type": "integer",
+            "title": "Vigentes"
+          },
+          "nao_vigentes": {
+            "type": "integer",
+            "title": "Nao Vigentes"
+          },
+          "itens": {
+            "items": {
+              "$ref": "#/components/schemas/ResultadoValidacao"
+            },
+            "type": "array",
+            "title": "Itens",
+            "description": "Na mesma ordem do pedido"
+          }
+        },
+        "type": "object",
+        "required": [
+          "vigentes",
+          "nao_vigentes",
+          "itens"
+        ],
+        "title": "ResultadoValidacoes"
       },
       "Saude": {
         "properties": {
