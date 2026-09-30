@@ -31,3 +31,70 @@ async def status_das_tabelas(con: AsyncConnection) -> list[Row[Any]]:
         """)
     )
     return list(resultado)
+
+
+_COLUNAS_CONCEITO = """
+    c.codigo, v.descricao, v.inicio_vigencia, v.fim_vigencia, v.fim_implantacao, v.atributos
+    FROM conceito c
+    JOIN conceito_versao v ON v.conceito_id = c.id AND v.publicado_ate IS NULL
+"""
+
+
+async def listar_tabelas(con: AsyncConnection) -> list[Row[Any]]:
+    resultado = await con.execute(
+        text("""
+        SELECT t.codigo, t.numero, t.descricao, t.carga_atual_id, t.ultima_sync_em,
+               atual.total AS conceitos
+        FROM tabela_tuss t
+        LEFT JOIN carga atual ON atual.id = t.carga_atual_id
+        ORDER BY t.numero::integer
+        """)
+    )
+    return list(resultado)
+
+
+async def tabela(con: AsyncConnection, codigo: str) -> Row[Any] | None:
+    resultado = await con.execute(
+        text("""
+        SELECT t.id, t.codigo, t.carga_atual_id, t.ultima_sync_em
+        FROM tabela_tuss t WHERE t.codigo = :codigo
+        """),
+        {"codigo": codigo},
+    )
+    return resultado.one_or_none()
+
+
+async def listar_conceitos(
+    con: AsyncConnection, tabela_id: int, apos: str | None, limite: int
+) -> list[Row[Any]]:
+    """Versão atual dos conceitos, em ordem de código, a partir de `apos` (paginação keyset).
+
+    Keyset em vez de OFFSET: "a partir do código X" usa o índice direto, e a página
+    1.000 custa o mesmo que a primeira.
+    """
+    params: dict[str, Any] = {"tabela": tabela_id, "limite": limite}
+    filtro = ""
+    if apos is not None:
+        filtro = "AND c.codigo > :apos"
+        params["apos"] = apos
+    resultado = await con.execute(
+        text(f"""
+        SELECT {_COLUNAS_CONCEITO}
+        WHERE c.tabela_id = :tabela {filtro}
+        ORDER BY c.codigo
+        LIMIT :limite
+        """),  # noqa: S608 (só trechos fixos entram no texto; valores vão como parâmetro)
+        params,
+    )
+    return list(resultado)
+
+
+async def conceito(con: AsyncConnection, tabela_id: int, codigo: str) -> Row[Any] | None:
+    resultado = await con.execute(
+        text(f"""
+        SELECT {_COLUNAS_CONCEITO}
+        WHERE c.tabela_id = :tabela AND c.codigo = :codigo
+        """),  # noqa: S608 (só trechos fixos entram no texto; valores vão como parâmetro)
+        {"tabela": tabela_id, "codigo": codigo},
+    )
+    return resultado.one_or_none()

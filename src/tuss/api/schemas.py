@@ -6,10 +6,12 @@ nova no banco só aparece na API quando alguém a coloca aqui.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
+
+from tuss.domain.vigencia import Criterio
 
 StatusCarga = Literal["em_andamento", "retida", "publicada", "sem_mudanca", "falhou"]
 
@@ -39,3 +41,55 @@ class Status(BaseModel):
 
 class Saude(BaseModel):
     status: Literal["ok"]
+
+
+class Tabela(BaseModel):
+    tabela: str = Field(examples=["tuss-22"])
+    numero: str = Field(examples=["22"])
+    descricao: str | None = Field(description="Vem do catálogo da ANS; vazia até a Fase 4")
+    conceitos: int | None = Field(description="Conceitos publicados na carga atual")
+    carga_id: int | None
+    sincronizado_em: datetime | None
+
+
+class ListaTabelas(BaseModel):
+    itens: list[Tabela]
+
+
+class Conceito(BaseModel):
+    codigo: str = Field(examples=["10101012"])
+    descricao: str = Field(
+        examples=["Consulta em consultório (no horário normal ou preestabelecido)"]
+    )
+    inicio_vigencia: date | None
+    fim_vigencia: date | None = Field(description="Vazio = período aberto")
+    fim_implantacao: date | None
+    atributos: dict[str, str] = Field(
+        description="Campos próprios de cada tabela (ex.: laboratorio na tuss-20)"
+    )
+    criterio: Criterio = Field(
+        description="oficial: datas informadas pela ANS; observado: período visto nas cargas"
+    )
+
+
+class ConceitoDetalhe(Conceito):
+    tabela: str = Field(examples=["tuss-22"])
+    carga_id: int = Field(description="Carga publicada de onde veio a resposta")
+    sincronizado_em: datetime | None = Field(description="Última vez que a fonte foi conferida")
+
+
+class PaginaConceitos(BaseModel):
+    tabela: str
+    carga_id: int | None
+    sincronizado_em: datetime | None
+    itens: list[Conceito]
+    proximo_cursor: str | None = Field(
+        description="Passe em `cursor` para a próxima página; vazio = acabou"
+    )
+
+
+class ParametrosLista(BaseModel):
+    model_config = ConfigDict(extra="forbid")  # parâmetro desconhecido (ex.: `limit`) é erro
+
+    cursor: str | None = Field(None, description="Valor de `proximo_cursor` da página anterior")
+    limite: int = Field(50, ge=1, le=200, description="Itens por página")

@@ -14,6 +14,7 @@ from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
 from typing import Any
 
+import httpx
 import pytest
 from alembic import command
 from alembic.config import Config as ConfigAlembic
@@ -21,10 +22,13 @@ from sqlalchemy import Row, pool, text
 from sqlalchemy.ext.asyncio import create_async_engine
 from testcontainers.community.postgres import PostgresContainer
 
+from tuss.api.app import criar_app
+from tuss.api.token import gerar_token, hash_token
 from tuss.config import PAPEL_DONO, Config
 
 POSTGRES_IMAGEM = "postgres:18-alpine"  # a mesma do compose.yaml
 ALEMBIC_INI = Path(__file__).parents[2] / "alembic.ini"
+TOKEN = gerar_token()
 TABELAS = "tabela_tuss, carga, conceito, conceito_versao, evento_mudanca, stg_conceito"
 
 
@@ -90,3 +94,23 @@ async def bd(config_banco: Config) -> AsyncIterator[BancoDeTeste]:
     banco = BancoDeTeste(config_banco)
     yield banco
     await banco.executar(PAPEL_DONO, f"TRUNCATE {TABELAS} RESTART IDENTITY CASCADE")
+
+
+def auth(token: str = TOKEN) -> dict[str, str]:
+    return {"Authorization": f"Bearer {token}"}
+
+
+async def cliente_da_api(config: Config) -> AsyncIterator[httpx.AsyncClient]:
+    """A API de verdade (com lifespan e pool), chamada sem rede, aceitando `TOKEN`."""
+    app = criar_app(config.model_copy(update={"api_tokens_sha256": hash_token(TOKEN)}))
+    async with (
+        app.router.lifespan_context(app),
+        httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://api") as c,
+    ):
+        yield c
+
+
+@pytest.fixture
+async def cliente(bd: BancoDeTeste) -> AsyncIterator[httpx.AsyncClient]:
+    async for c in cliente_da_api(bd.config):
+        yield c
