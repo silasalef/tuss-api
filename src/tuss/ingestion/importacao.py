@@ -17,6 +17,7 @@ from __future__ import annotations
 import gzip
 import shutil
 from dataclasses import dataclass
+from itertools import batched
 from pathlib import Path
 
 from sqlalchemy import text
@@ -29,6 +30,7 @@ from tuss.ingestion.lote import Lote
 from tuss.ingestion.publicacao import gravar_rascunho, publicar, travar
 
 MAX_CARACTERES_ERRO = 2000
+TAMANHO_DO_BLOCO = 5000  # conceitos por INSERT no rascunho: memória constante
 
 
 class ImportacaoRecusada(RuntimeError):
@@ -67,7 +69,8 @@ async def importar(lote: Lote, config: Config) -> ResultadoImportacao:
             snapshot = salvar_snapshot(lote.fonte, tabela, config.snapshots_dir)
             async with engine.begin() as con:
                 await travar(con, tabela)
-                await gravar_rascunho(con, carga_id, lote.itens)
+                for bloco in batched(lote.conceitos(), TAMANHO_DO_BLOCO, strict=False):
+                    await gravar_rascunho(con, carga_id, bloco)
                 publicado = await publicar(con, carga_id, tabela_id, tabela)
         except Exception as exc:
             async with engine.begin() as con:

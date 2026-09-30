@@ -38,7 +38,7 @@ def inspecionar(caminho: ArquivoDoPortal) -> None:
     """
     lote = _ler(caminho)
     _resumo(lote)
-    if lote.erros or lote.duplicados:
+    if lote.total_erros or lote.duplicados:
         raise typer.Exit(1)
 
 
@@ -250,17 +250,14 @@ def _ler(caminho: Path) -> Lote:
 
 
 def _resumo(lote: Lote) -> None:
-    inicios = [c.inicio_vigencia for c, _ in lote.itens if c.inicio_vigencia]
-    com_fim = sum(1 for c, _ in lote.itens if c.fim_vigencia)
-
     typer.echo(f"Arquivo:     {lote.fonte.caminho.name}")
     typer.echo(f"SHA-256:     {lote.fonte.sha256}")
     typer.echo(f"Registros:   {lote.total_registros}")
     typer.echo("Tabelas:     " + ", ".join(f"{t} ({n})" for t, n in sorted(lote.tabelas.items())))
-    if inicios:
-        typer.echo(f"Início vig.: {min(inicios)} a {max(inicios)}")
-    typer.echo(f"Com fim de vigência: {com_fim}")
-    typer.echo(f"Inválidos:   {len(lote.erros)}")
+    if lote.inicio_vigencia_min:
+        typer.echo(f"Início vig.: {lote.inicio_vigencia_min} a {lote.inicio_vigencia_max}")
+    typer.echo(f"Com fim de vigência: {lote.com_fim_vigencia}")
+    typer.echo(f"Inválidos:   {lote.total_erros}")
     for erro in lote.erros[:MAX_ERROS_EXIBIDOS]:
         typer.echo(f"  - {erro}")
     typer.echo(f"Duplicados:  {len(lote.duplicados)}")
