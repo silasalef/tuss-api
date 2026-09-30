@@ -214,6 +214,16 @@ async def buscar_por_codigo(
     return list(resultado)
 
 
+# Quantos candidatos de cada tipo entram na ordenação por relevância. Um termo comum
+# ("parafuso" está em 461 mil conceitos da tuss-19) não precisa ter a relevância de todos
+# calculada para devolver 50: com uma palavra genérica eles empatam, e quem quer algo
+# específico refina a busca. Termos raros ficam abaixo do teto e continuam exatos.
+# Limitação conhecida: nas tabelas gigantes (19, 64), com erro de digitação, os 1.000
+# parecidos são quaisquer, não os mais parecidos (ordenar exigiria índice GiST de
+# trigramas por tabela).
+MAX_CANDIDATOS = 1000
+
+
 async def buscar_por_texto(
     con: AsyncConnection, tabela_id: int, termo: str, limite: int
 ) -> list[Row[Any]]:
@@ -221,17 +231,29 @@ async def buscar_por_texto(
 
     Primeiro as que têm todas as palavras (full-text, pela raiz da palavra); depois
     as parecidas (trigramas, para erro de digitação). Empate: ordem de código.
+    Cada tipo contribui com no máximo `MAX_CANDIDATOS` conceitos para a ordenação.
     """
     resultado = await con.execute(
         text(f"""
         WITH termo AS (
             SELECT websearch_to_tsquery('portuguese', tuss_sem_acento(:termo)) AS consulta,
                    lower(tuss_sem_acento(:termo)) AS normalizado
+        ), por_palavra AS (
+            SELECT v.id FROM conceito_versao v
+            JOIN conceito c ON c.id = v.conceito_id, termo
+            WHERE c.tabela_id = :tabela AND v.publicado_ate IS NULL
+              AND v.busca @@ termo.consulta
+            LIMIT :candidatos
+        ), parecidos AS (
+            SELECT v.id FROM conceito_versao v
+            JOIN conceito c ON c.id = v.conceito_id, termo
+            WHERE c.tabela_id = :tabela AND v.publicado_ate IS NULL
+              AND termo.normalizado <% v.descricao_normalizada
+            LIMIT :candidatos
         )
         SELECT {_COLUNAS_CONCEITO}
         CROSS JOIN termo
-        WHERE c.tabela_id = :tabela
-          AND (v.busca @@ termo.consulta OR termo.normalizado <% v.descricao_normalizada)
+        WHERE v.id IN (SELECT id FROM por_palavra UNION SELECT id FROM parecidos)
         ORDER BY
             v.busca @@ termo.consulta DESC,
             ts_rank(v.busca, termo.consulta) DESC,
@@ -239,7 +261,7 @@ async def buscar_por_texto(
             c.codigo
         LIMIT :limite
         """),  # noqa: S608 (só trechos fixos entram no texto; valores vão como parâmetro)
-        {"tabela": tabela_id, "termo": termo, "limite": limite},
+        {"tabela": tabela_id, "termo": termo, "limite": limite, "candidatos": MAX_CANDIDATOS},
     )
     return list(resultado)
 

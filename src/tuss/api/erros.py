@@ -17,6 +17,7 @@ import structlog
 from fastapi import FastAPI, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from sqlalchemy.exc import DBAPIError
 from starlette.exceptions import HTTPException
 
 log = structlog.get_logger("tuss.api")
@@ -60,6 +61,11 @@ async def _registrar_requisicao(
     inicio = time.perf_counter()
     try:
         resposta = await proxima(request)
+    except DBAPIError as exc:
+        if _estourou_o_tempo(exc):
+            resposta = _consulta_demorada(request)
+        else:
+            resposta = _erro_interno(request, exc)
     except Exception as exc:  # erro não previsto: responde 500 aqui, uma vez, e registra
         resposta = _erro_interno(request, exc)
     resposta.headers["X-Request-ID"] = request.state.request_id
@@ -89,6 +95,26 @@ async def _erro_validacao(request: Request, exc: RequestValidationError) -> JSON
         for e in exc.errors()
     ]
     return problema(request, 422, "parâmetros inválidos", erros=erros)
+
+
+# Código do Postgres para consulta cancelada pelo statement_timeout do papel `api` (2 s).
+_SQLSTATE_TEMPO_ESGOTADO = "57014"
+
+
+def _estourou_o_tempo(exc: DBAPIError) -> bool:
+    return getattr(exc.orig, "sqlstate", None) == _SQLSTATE_TEMPO_ESGOTADO
+
+
+def _consulta_demorada(request: Request) -> JSONResponse:
+    """Consulta pesada demais: não é defeito da API, é pedido amplo demais. Diz como refinar."""
+    log.warning("consulta_demorada", request_id=_request_id(request), rota=request.url.path)
+    return problema(
+        request,
+        503,
+        "a consulta passou do limite de 2 s; refine o pedido (busca mais específica,"
+        " data mais recente em vigente_em, ou POST /v1/validacoes para códigos específicos)",
+        {"Retry-After": "60"},
+    )
 
 
 def _erro_interno(request: Request, exc: Exception) -> JSONResponse:
