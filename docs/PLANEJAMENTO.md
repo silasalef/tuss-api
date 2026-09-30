@@ -214,7 +214,7 @@ Regra de arquitetura: `domain/` não importa nada de banco, HTTP ou framework, o
 
 ## Roadmap por fases
 
-1. Fase 0: descoberta da fonte (quase concluída). Falta: confirmar que a página 1 sempre traz os mais recentes (base da coleta incremental) e registrar a decisão num ADR.
+1. Fase 0: descoberta da fonte (concluída; decisão no ADR 0001, ordem da página 1 confirmada em 30/09/2026 em `docs/ordem-da-fonte.md`).
    - Saída: `docs/fonte-ans.md` atualizado, fixtures das tabelas 22, 23 e 20, ADR da estratégia de coleta.
 2. Fase 1: fundação. Repositório, CI, Compose, migrations, modelo de dados e `tuss importar` para arquivos do portal.
    - Saída: tabelas 22 e 20 importadas e consultáveis por SQL, com snapshot e carga registrados.
@@ -236,7 +236,7 @@ O maior risco é a própria fonte: lenta, sem histórico, com arquivos em lote d
 | Risco | Impacto | Mitigação |
 | --- | --- | --- |
 | Fonte lenta (~2 min por página) ou fora do ar | Dados atrasados | Coleta incremental, checkpoint, backoff; a API responde da última carga e informa a data |
-| Página 1 não trazer sempre os mais recentes | Coleta incremental perde inclusões | Confirmar na Fase 0; plano B é varredura completa só das tabelas pequenas e médias e reimportação de arquivo para 19 e 64 |
+| Página 1 deixar de trazer os mais recentes | Coleta incremental perde inclusões | Confirmado em 30/09/2026 que traz (`docs/ordem-da-fonte.md`); a varredura completa periódica pega o que escapar; plano B é varredura completa das tabelas pequenas e médias e reimportação de arquivo para 19 e 64 |
 | Alterações e remoções nas tabelas grandes | Só aparecem na varredura completa | Varredura em ciclo longo; datas de vigência da ANS continuam valendo entre varreduras |
 | Schema do conceito muda sem aviso | Carga com dado errado | Validação estrita; carga fica retida em vez de publicar |
 | Licença de uso dos dados | Exposição pública indevida | Portal gov.br usa CC BY-ND 3.0; creditar a ANS. Só vira questão se a API for aberta ao público; o código no GitHub e as fixtures pequenas não dependem disso |
@@ -244,7 +244,7 @@ O maior risco é a própria fonte: lenta, sem histórico, com arquivos em lote d
 
 Decisões em aberto:
 
-- [ ] Coleta incremental das tabelas grandes (depende da ordem da página 1).
+- [x] Coleta incremental das tabelas grandes: a página 1 traz os mais recentes (confirmado em 30/09/2026 na tuss-20, `docs/ordem-da-fonte.md`).
 
 Decisões tomadas em 29/09/2026: código público e API privada (túnel SSH + token), sem acesso de terceiros por enquanto; hospedagem em VPS própria, com Postgres local em Docker Compose (planos gratuitos de Postgres gerenciado limitam o banco a poucas centenas de MB); publicação automática dentro dos limites de anomalia, com aprovação manual acima deles; carga inicial por arquivo do portal; webhooks e MCP fora do MVP.
 
