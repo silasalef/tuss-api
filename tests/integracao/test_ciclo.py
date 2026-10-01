@@ -122,9 +122,12 @@ async def test_novidade_em_tabela_gigante_avisa_para_conferir_o_portal(
 
     novo = {**opme[0], "id": "99999999", "display_name": "OPME nova"}
     ans.tabelas = {"tuss-19": [novo, *opme], "tuss-22": TUSS_22, "tuss-23": TUSS_23}
+    ans.pedidas.clear()
     async with ClienteANS(transporte=httpx.MockTransport(ans), espera_base_s=0) as cliente:
         resultados = await executar_ciclo(cliente, config, AGORA)
 
+    # Tabelas sem carga vêm antes da incremental da tuss-19, que pode demorar.
+    assert ans.pedidas.index("tuss-23") < ans.pedidas.index("tuss-19")
     opme_resultado = next(r for r in resultados if r.tabela == "tuss-19")
     assert (opme_resultado.status, opme_resultado.detalhe) == ("publicada", AVISO_ARQUIVO_NOVO)
     assert all(r.detalhe != AVISO_ARQUIVO_NOVO for r in resultados if r.tabela != "tuss-19")

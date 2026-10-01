@@ -12,7 +12,10 @@ Política de cada tabela (`escolher_modo`, ADR 0001):
   novidade nelas, a ANS publicou uma atualização: o ciclo avisa para conferir se o
   portal tem arquivo novo.
 
-Leituras completas longas ficam para o fim do ciclo, depois das tabelas rápidas.
+Ordem: primeiro as tabelas que ainda não têm carga (costumam ser pequenas e ficam
+prontas no mesmo dia), depois as já carregadas e, por último, as leituras completas
+longas. Assim uma incremental demorada (ex.: arquivo do portal muito atrasado) não
+segura as tabelas novas.
 Uma tabela com problema não impede as outras. Se a ANS parar de responder em 3
 tabelas seguidas, o ciclo termina: ela está fora do ar, e insistir não ajuda.
 """
@@ -89,8 +92,8 @@ async def executar_ciclo(
     resultados = []
     falhas_da_fonte = 0
     situacoes = await _situacoes(config)
-    # Leituras completas longas por último: não atrasam as tabelas rápidas.
-    situacoes.sort(key=lambda t: _longa(t, agora))
+    # Tabelas sem carga primeiro, completas longas por último (ver docstring do módulo).
+    situacoes.sort(key=lambda t: (_longa(t, agora), t.carregada))
     for tabela in situacoes:
         modo, motivo = escolher_modo(tabela, agora)
         if modo is None:
