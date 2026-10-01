@@ -239,15 +239,13 @@ async def buscar_por_texto(
             SELECT websearch_to_tsquery('portuguese', tuss_sem_acento(:termo)) AS consulta,
                    lower(tuss_sem_acento(:termo)) AS normalizado
         ), por_palavra AS (
-            SELECT v.id FROM conceito_versao v
-            JOIN conceito c ON c.id = v.conceito_id, termo
-            WHERE c.tabela_id = :tabela AND v.publicado_ate IS NULL
+            SELECT v.id FROM conceito_versao v, termo
+            WHERE v.tabela_id = :tabela AND v.publicado_ate IS NULL
               AND v.busca @@ termo.consulta
             LIMIT :candidatos
         ), parecidos AS (
-            SELECT v.id FROM conceito_versao v
-            JOIN conceito c ON c.id = v.conceito_id, termo
-            WHERE c.tabela_id = :tabela AND v.publicado_ate IS NULL
+            SELECT v.id FROM conceito_versao v, termo
+            WHERE v.tabela_id = :tabela AND v.publicado_ate IS NULL
               AND termo.normalizado <% v.descricao_normalizada
             LIMIT :candidatos
         )

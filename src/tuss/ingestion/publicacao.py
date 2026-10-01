@@ -131,9 +131,10 @@ async def _publicar_carga_inicial(con: AsyncConnection, carga_id: int, tabela_id
 # now() é o mesmo instante para a transação inteira: todas as versões nascem juntas,
 # no mesmo instante em que as anteriores foram fechadas.
 _INSERIR_VERSOES = """
-INSERT INTO conceito_versao (conceito_id, carga_id, descricao, atributos, hash_conteudo,
-                             inicio_vigencia, fim_vigencia, fim_implantacao, publicado_de)
-SELECT c.id, s.carga_id, s.descricao, s.atributos, s.hash_conteudo,
+INSERT INTO conceito_versao (conceito_id, tabela_id, carga_id, descricao, atributos,
+                             hash_conteudo, inicio_vigencia, fim_vigencia, fim_implantacao,
+                             publicado_de)
+SELECT c.id, c.tabela_id, s.carga_id, s.descricao, s.atributos, s.hash_conteudo,
        s.inicio_vigencia, s.fim_vigencia, s.fim_implantacao, now()
 FROM stg_conceito s
 JOIN conceito c ON c.tabela_id = :tabela AND c.codigo = s.codigo

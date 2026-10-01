@@ -11,12 +11,12 @@ CENARIO = (
     "INSERT INTO tabela_tuss (codigo, descricao) VALUES ('tuss-22', 'Procedimentos')",
     "INSERT INTO carga (tabela_id, origem, arquivo_nome) VALUES (1, 'arquivo', 'tuss-22.zip')",
     "INSERT INTO conceito (tabela_id, codigo) VALUES (1, '00010014')",
-    """INSERT INTO conceito_versao (conceito_id, carga_id, descricao, hash_conteudo, publicado_de)
-       VALUES (1, 1, 'Consulta', repeat('a', 64), '2026-09-01')""",
+    """INSERT INTO conceito_versao (conceito_id, tabela_id, carga_id, descricao, hash_conteudo,
+       publicado_de) VALUES (1, 1, 1, 'Consulta', repeat('a', 64), '2026-09-01')""",
 )
 NOVA_VERSAO = """
-    INSERT INTO conceito_versao (conceito_id, carga_id, descricao, hash_conteudo, publicado_de)
-    VALUES (1, 1, 'Consulta em consultório', repeat('b', 64), '2026-09-15')"""
+    INSERT INTO conceito_versao (conceito_id, tabela_id, carga_id, descricao, hash_conteudo,
+    publicado_de) VALUES (1, 1, 1, 'Consulta em consultório', repeat('b', 64), '2026-09-15')"""
 FECHA_VERSAO_ATUAL = """
     UPDATE conceito_versao SET publicado_ate = '2026-09-15'
     WHERE conceito_id = 1 AND publicado_ate IS NULL"""
@@ -141,3 +141,16 @@ def test_migration_recusa_senha_fraca(
     finally:
         monkeypatch.undo()
         migrar("head")
+
+
+async def test_versao_e_sempre_da_mesma_tabela_do_conceito(bd: BancoDeTeste) -> None:
+    await bd.executar(PAPEL_INGESTAO, *CENARIO)
+    await bd.executar(
+        PAPEL_INGESTAO, "INSERT INTO tabela_tuss (codigo, descricao) VALUES ('tuss-20', 'x')"
+    )
+    with pytest.raises(DBAPIError, match="foreign key"):
+        await bd.executar(
+            PAPEL_INGESTAO,
+            FECHA_VERSAO_ATUAL,
+            NOVA_VERSAO.replace("(1, 1, 1,", "(1, 2, 1,"),  # conceito da tuss-22 na tuss-20
+        )
