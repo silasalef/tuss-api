@@ -19,6 +19,7 @@ import pytest
 from conftest import BancoDeTeste, auth, cliente_da_api
 
 from tuss.config import PAPEL_DONO
+from tuss.db import consultas
 from tuss.ingestion.decisao import aprovar
 from tuss.ingestion.importacao import importar
 from tuss.ingestion.lote import ler_lote
@@ -167,10 +168,14 @@ async def _vigentes_pela_lista(cliente: httpx.AsyncClient, em: str) -> dict[str,
 @pytest.mark.parametrize(
     "em", ["2009-01-01", "2020-06-01", "2026-09-01", "2026-09-15", "2026-09-22", "2026-09-30"]
 )
+@pytest.mark.parametrize("max_candidatos", [-1, 1_000_000], ids=["por_codigo", "por_candidatos"])
 async def test_vigente_em_bate_com_a_consulta_codigo_a_codigo(
-    cenario: httpx.AsyncClient, em: str
+    cenario: httpx.AsyncClient, em: str, max_candidatos: int, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A lista (SQL) e a consulta de um código (regra em domain/vigencia.py) concordam."""
+    """A lista (SQL) e a consulta de um código (regra em domain/vigencia.py) concordam,
+    pelos dois caminhos da lista (ordem de código e candidatos pelo índice)."""
+    monkeypatch.setattr(consultas, "MAX_CANDIDATOS_VIGENCIA", max_candidatos)
+    monkeypatch.setattr(consultas, "FRACAO_CANDIDATOS_VIGENCIA", 0)
     codigos = [
         item["codigo"]
         for item in (await _get(cenario, "/v1/tabelas/22/conceitos", limite=200)).json()["itens"]
