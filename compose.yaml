@@ -37,7 +37,9 @@ services:
       - max_connections=30
     volumes:
       - pgdata:/var/lib/postgresql # a partir do Postgres 18 o volume é montado aqui, não em .../data
-    mem_limit: 512m
+    # 1 GB: com as tabelas 19 e 64 (3 milhões de conceitos), cargas e migrations grandes
+    # passaram de 512 MB e o processo foi encerrado por falta de memória.
+    mem_limit: 1g
     security_opt:
       - no-new-privileges:true
     healthcheck:
