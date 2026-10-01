@@ -7,15 +7,13 @@ Política de cada tabela (`escolher_modo`, ADR 0001):
 - até 2.000 páginas (a 20 tem ~1.800): incremental todo dia e completa a cada 30 dias.
   Nenhuma execução lê mais de 300 páginas (~5 h): a completa de uma tabela maior que
   isso é dividida em trechos, um por ciclo, retomando de onde parou;
-- maior que isso (19 e 64): só incremental; a primeira carga, as alterações e as
-  remoções vêm de arquivo do portal (`tuss importar`). Quando o incremental encontra
-  novidade nelas, a ANS publicou uma atualização: o ciclo avisa para conferir se o
-  portal tem arquivo novo.
+- maior que isso (19 e 64): fora do ciclo. A primeira carga vem de arquivo do portal
+  (`tuss importar`) e a incremental fica com o serviço de recuperação
+  (`tuss recuperar`), que roda o tempo todo em trechos: o arquivo ficou meses atrás da
+  API e alcançar a diferença leva dias.
 
-Ordem: primeiro as tabelas que ainda não têm carga (costumam ser pequenas e ficam
-prontas no mesmo dia), depois as já carregadas e, por último, as leituras completas
-longas. Assim uma incremental demorada (ex.: arquivo do portal muito atrasado) não
-segura as tabelas novas.
+Ordem: da menor tabela para a maior, e as leituras completas longas por último.
+Assim as tabelas rápidas ficam prontas cedo e uma tabela demorada não segura as outras.
 Uma tabela com problema não impede as outras. Se a ANS parar de responder em 3
 tabelas seguidas, o ciclo termina: ela está fora do ar, e insistir não ajuda.
 """
@@ -34,7 +32,6 @@ from tuss.db.conexao import criar_engine
 from tuss.ingestion.catalogo import sincronizar_catalogo
 from tuss.ingestion.coleta import ColetaRecusada, Modo, coletar
 from tuss.ingestion.fonte import ClienteANS, FonteIndisponivel
-from tuss.ingestion.publicacao import Contagem
 
 log = structlog.get_logger("tuss.worker")
 
@@ -43,7 +40,6 @@ PAGINAS_SEMPRE_COMPLETA = 2
 PAGINAS_POR_EXECUCAO = 300  # ~5 h de leitura; também o limite para a primeira carga pela API
 MAX_PAGINAS_COMPLETA = 2000  # acima disso, a leitura completa levaria semanas
 DIAS_ENTRE_COMPLETAS = 30
-AVISO_ARQUIVO_NOVO = "a ANS publicou novidade; confira se o portal tem arquivo novo (tuss importar)"
 MAX_FALHAS_DA_FONTE_SEGUIDAS = 3
 
 
@@ -71,6 +67,8 @@ def escolher_modo(t: SituacaoTabela, agora: datetime) -> tuple[Modo | None, str]
         if t.paginas > PAGINAS_POR_EXECUCAO:
             return None, f"~{t.paginas} páginas: carga inicial por arquivo (tuss importar)"
         return "completa", "primeira carga"
+    if gigante(t):
+        return None, "coletada pelo serviço de recuperação (tuss recuperar)"
     if t.paginas <= PAGINAS_SEMPRE_COMPLETA:
         return "completa", "tabela pequena"
     vencida = t.ultima_completa_em is None or agora - t.ultima_completa_em > timedelta(
@@ -91,9 +89,9 @@ async def executar_ciclo(
 
     resultados = []
     falhas_da_fonte = 0
-    situacoes = await _situacoes(config)
-    # Tabelas sem carga primeiro, completas longas por último (ver docstring do módulo).
-    situacoes.sort(key=lambda t: (_longa(t, agora), t.carregada))
+    situacoes = await carregar_situacoes(config)
+    # Da menor para a maior, completas longas por último (ver docstring do módulo).
+    situacoes.sort(key=lambda t: (_longa(t, agora), t.paginas))
     for tabela in situacoes:
         modo, motivo = escolher_modo(tabela, agora)
         if modo is None:
@@ -123,11 +121,7 @@ async def executar_ciclo(
             continue
         parou_por_falha = r.status == "em_andamento" and r.paginas_lidas < PAGINAS_POR_EXECUCAO
         falhas_da_fonte = falhas_da_fonte + 1 if parou_por_falha else 0
-        detalhe = r.motivo or ""
-        if _novidade_so_por_arquivo(tabela, r.modo, r.contagem):
-            detalhe = AVISO_ARQUIVO_NOVO
-            log.warning("arquivo_novo_provavel", tabela=tabela.codigo, carga_id=r.carga_id)
-        resultados.append(ResultadoTabela(tabela.codigo, r.status, detalhe))
+        resultados.append(ResultadoTabela(tabela.codigo, r.status, r.motivo or ""))
         log.info(
             "coleta_fim",
             tabela=tabela.codigo,
@@ -147,15 +141,12 @@ def _longa(t: SituacaoTabela, agora: datetime) -> bool:
     return escolher_modo(t, agora)[0] == "completa" and t.paginas > PAGINAS_POR_EXECUCAO
 
 
-def _novidade_so_por_arquivo(t: SituacaoTabela, modo: Modo, contagem: Contagem | None) -> bool:
-    """Novidade numa tabela que a API nunca lê inteira: alterações e remoções no meio
-    da lista só chegam por arquivo novo do portal."""
-    if t.paginas <= MAX_PAGINAS_COMPLETA or modo != "incremental" or contagem is None:
-        return False
-    return contagem["incluido"] + contagem["alterado"] + contagem["reativado"] > 0
+def gigante(t: SituacaoTabela) -> bool:
+    """Grande demais para a API inteira (19 e 64): vive no serviço de recuperação."""
+    return t.paginas > MAX_PAGINAS_COMPLETA
 
 
-async def _situacoes(config: Config) -> list[SituacaoTabela]:
+async def carregar_situacoes(config: Config) -> list[SituacaoTabela]:
     engine = criar_engine(config, PAPEL_INGESTAO)
     try:
         async with engine.connect() as con:

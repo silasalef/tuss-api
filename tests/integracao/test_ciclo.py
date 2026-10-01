@@ -10,7 +10,7 @@ import pytest
 from conftest import BancoDeTeste
 
 from tuss.config import PAPEL_API, Config
-from tuss.ingestion.ciclo import AVISO_ARQUIVO_NOVO, executar_ciclo
+from tuss.ingestion.ciclo import executar_ciclo
 from tuss.ingestion.coleta import coletar
 from tuss.ingestion.fonte import ClienteANS
 
@@ -23,7 +23,8 @@ TUSS_23: list[dict[str, Any]] = json.loads(
 )
 CATALOGO = [
     {"Codigo": "tuss-19", "Descricao": "OPME", "Total_sources": 1389786},
-    {"Codigo": "tuss-22", "Descricao": "Procedimentos em saúde", "Total_sources": 25},
+    # Catálogo diz 2 páginas (o total do catálogo pode não bater com os dados).
+    {"Codigo": "tuss-22", "Descricao": "Procedimentos em saúde", "Total_sources": 30},
     {"Codigo": "tuss-23", "Descricao": "Caráter do atendimento", "Total_sources": len(TUSS_23)},
 ]
 AGORA = datetime(2026, 10, 1, 6, tzinfo=UTC)
@@ -64,10 +65,11 @@ async def test_primeiro_ciclo_carrega_as_tabelas_possiveis(
 ) -> None:
     ans = ANSFalsa({"tuss-22": TUSS_22, "tuss-23": TUSS_23})
 
+    # Da menor para a maior.
     assert await _ciclo(ans, config) == [
-        ("tuss-19", "pulada"),  # grande demais: carga inicial por arquivo
-        ("tuss-22", "publicada"),
         ("tuss-23", "publicada"),
+        ("tuss-22", "publicada"),
+        ("tuss-19", "pulada"),  # grande demais: carga inicial por arquivo
     ]
     assert "tuss-19" not in ans.pedidas
     linhas = await bd.executar(
@@ -83,9 +85,9 @@ async def test_primeiro_ciclo_carrega_as_tabelas_possiveis(
 
     # No dia seguinte, sem novidade na ANS.
     assert await _ciclo(ans, config) == [
-        ("tuss-19", "pulada"),
-        ("tuss-22", "sem_mudanca"),
         ("tuss-23", "sem_mudanca"),
+        ("tuss-22", "sem_mudanca"),
+        ("tuss-19", "pulada"),
     ]
 
 
@@ -94,9 +96,9 @@ async def test_ans_fora_do_ar_nao_derruba_o_ciclo(bd: BancoDeTeste, config: Conf
     resultados = await _ciclo(ans, config)
     # Tabelas novas vão em modo completo: com a fonte fora, ficam em andamento para retomar.
     assert resultados == [
-        ("tuss-19", "pulada"),
-        ("tuss-22", "em_andamento"),
         ("tuss-23", "em_andamento"),
+        ("tuss-22", "em_andamento"),
+        ("tuss-19", "pulada"),
     ]
     status = await bd.executar(PAPEL_API, "SELECT status, checkpoint FROM carga ORDER BY id")
     assert [tuple(s) for s in status] == [("em_andamento", 0), ("em_andamento", 0)]
@@ -105,29 +107,22 @@ async def test_ans_fora_do_ar_nao_derruba_o_ciclo(bd: BancoDeTeste, config: Conf
     ans.fora_do_ar = False
     ans.tabelas = {"tuss-22": TUSS_22, "tuss-23": TUSS_23}
     assert await _ciclo(ans, config) == [
-        ("tuss-19", "pulada"),
-        ("tuss-22", "publicada"),
         ("tuss-23", "publicada"),
+        ("tuss-22", "publicada"),
+        ("tuss-19", "pulada"),
     ]
 
 
-async def test_novidade_em_tabela_gigante_avisa_para_conferir_o_portal(
-    config: Config, tmp_path: Path
-) -> None:
+async def test_tabela_gigante_carregada_fica_com_a_recuperacao(config: Config) -> None:
     # tuss-19 carregada (aqui, com poucos registros); o catálogo diz 1,4 milhão.
     opme = [{**r, "source": "tuss-19"} for r in TUSS_22]
-    ans = ANSFalsa({"tuss-19": opme})
+    ans = ANSFalsa({"tuss-19": opme, "tuss-22": TUSS_22, "tuss-23": TUSS_23})
     async with ClienteANS(transporte=httpx.MockTransport(ans), espera_base_s=0) as cliente:
         await coletar("tuss-19", cliente, config, modo="completa")
-
-    novo = {**opme[0], "id": "99999999", "display_name": "OPME nova"}
-    ans.tabelas = {"tuss-19": [novo, *opme], "tuss-22": TUSS_22, "tuss-23": TUSS_23}
-    ans.pedidas.clear()
-    async with ClienteANS(transporte=httpx.MockTransport(ans), espera_base_s=0) as cliente:
+        ans.pedidas.clear()
         resultados = await executar_ciclo(cliente, config, AGORA)
 
-    # Tabelas sem carga vêm antes da incremental da tuss-19, que pode demorar.
-    assert ans.pedidas.index("tuss-23") < ans.pedidas.index("tuss-19")
     opme_resultado = next(r for r in resultados if r.tabela == "tuss-19")
-    assert (opme_resultado.status, opme_resultado.detalhe) == ("publicada", AVISO_ARQUIVO_NOVO)
-    assert all(r.detalhe != AVISO_ARQUIVO_NOVO for r in resultados if r.tabela != "tuss-19")
+    assert opme_resultado.status == "pulada"
+    assert "tuss recuperar" in opme_resultado.detalhe
+    assert "tuss-19" not in ans.pedidas

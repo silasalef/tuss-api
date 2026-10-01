@@ -143,6 +143,16 @@ def worker() -> None:
 
 
 @app.command()
+def recuperar() -> None:
+    """Roda o serviço de recuperação: incremental das tabelas gigantes (19 e 64), em trechos."""
+    from tuss import recuperacao
+    from tuss.log import configurar as configurar_log
+
+    configurar_log()
+    recuperacao.main(Config())
+
+
+@app.command()
 def ciclo() -> None:
     """Roda um ciclo de coleta agora (catálogo e todas as tabelas), sem esperar a hora."""
     from tuss import worker as w

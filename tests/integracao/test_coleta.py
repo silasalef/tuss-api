@@ -221,3 +221,38 @@ async def test_completa_em_trechos(bd: BancoDeTeste, config: Config) -> None:
     terceiro = await _coletar(ans, config, max_paginas=2)
     assert (terceiro.carga_id, terceiro.status, terceiro.total) == (1, "publicada", 25)
     assert ans.pedidas == [1, 2, 3, 4, 5]
+
+
+async def test_incremental_em_trechos_continua_de_onde_parou(
+    bd: BancoDeTeste, config: Config
+) -> None:
+    # Arquivo atrasado: 15 códigos novos (3 páginas) antes dos já conhecidos.
+    await _coletar(ANSFalsa(REGISTROS), config)
+    novos = [
+        {**REGISTROS[0], "id": f"900000{n:02d}", "display_name": f"Novo {n}"} for n in range(15)
+    ]
+    ans = ANSFalsa([*novos, *REGISTROS])
+
+    primeiro = await _coletar(ans, config, max_paginas=2)
+    assert (primeiro.status, primeiro.continua_em) == ("publicada", 3)
+    assert primeiro.contagem["incluido"] == 10
+    assert ans.pedidas == [1, 2]
+
+    # A ANS inclui mais um no topo: a lista anda uma posição, e o trecho seguinte relê
+    # um código já publicado em vez de pular algum.
+    mais_novo = {**REGISTROS[0], "id": "90000099", "display_name": "Mais novo"}
+    ans = ANSFalsa([mais_novo, *novos, *REGISTROS])
+    segundo = await _coletar(ans, config, max_paginas=2)
+    assert (segundo.status, segundo.continua_em, ans.pedidas) == ("publicada", 5, [3, 4])
+    assert segundo.contagem["incluido"] == 5
+
+    ans.pedidas.clear()
+    terceiro = await _coletar(ans, config, max_paginas=2)  # 2 páginas conhecidas: em dia
+    assert (terceiro.status, terceiro.continua_em, ans.pedidas) == ("sem_mudanca", None, [5, 6])
+
+    ans.pedidas.clear()
+    quarto = await _coletar(ans, config, max_paginas=5)  # em dia: volta ao topo
+    assert (quarto.status, quarto.continua_em, ans.pedidas) == ("publicada", None, [1, 2, 3])
+    assert (quarto.contagem["incluido"], quarto.total) == (1, 41)
+    continua = await bd.executar(PAPEL_API, "SELECT id, continua_em FROM carga ORDER BY id")
+    assert [tuple(c) for c in continua] == [(1, None), (2, 3), (3, 5), (4, None), (5, None)]

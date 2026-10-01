@@ -11,6 +11,9 @@ Dois modos:
 - **incremental**: lê a partir da página 1 (onde a ANS põe os códigos mais novos) e
   para depois de 2 páginas seguidas só com códigos já publicados e sem alteração.
   Publica como carga parcial: inclusões, alterações e reativações, sem remoções.
+  Com `max_paginas`, lê em trechos: se o limite chegar antes dos códigos conhecidos,
+  publica o que leu e grava em `continua_em` onde a próxima incremental começa
+  (tabelas 19 e 64, cujo arquivo do portal ficou meses atrás da API).
 
 Nenhuma requisição à ANS acontece com transação aberta: uma página leva de 1 a 3 min.
 Cada página recebida é guardada como veio (snapshot comprimido) antes de ser usada.
@@ -56,6 +59,7 @@ class ResultadoColeta:
     contagem: Contagem | None = None
     total: int | None = None
     motivo: str | None = None  # da retenção, ou por que a coleta parou no meio
+    continua_em: int | None = None  # incremental em trechos: próxima página a ler
 
 
 async def coletar(
@@ -67,8 +71,8 @@ async def coletar(
 ) -> ResultadoColeta:
     """Coleta a tabela. Sem `modo`: incremental se já tem carga publicada, senão completa.
 
-    `max_paginas`: na coleta completa, para depois de ler tantas páginas e deixa a carga
-    em andamento; a próxima execução continua dali. Divide tabelas grandes em trechos.
+    `max_paginas`: para depois de ler tantas páginas; a próxima execução continua dali.
+    Na completa, a carga fica em andamento; na incremental, o trecho lido é publicado.
     """
     engine = criar_engine(config, PAPEL_INGESTAO)
     try:
@@ -109,6 +113,7 @@ async def _coletar(
     max_paginas: int | None,
 ) -> ResultadoColeta:
     carga_id, modo, ultima_pagina = await _abrir_ou_retomar(engine, tabela, modo)
+    continua_em: int | None = None
     try:
         if modo == "completa":
             lidas, terminou = await _ler_tudo(
@@ -124,7 +129,9 @@ async def _coletar(
                     motivo=f"leu {lidas} páginas (limite desta execução); continua na próxima",
                 )
         else:
-            lidas = await _ler_o_topo(engine, cliente, config, carga_id, tabela)
+            lidas, continua_em = await _ler_o_topo(
+                engine, cliente, config, carga_id, tabela, ultima_pagina, max_paginas
+            )
     except FonteIndisponivel as exc:
         if modo == "completa":  # fica em andamento: a próxima execução retoma
             return ResultadoColeta(carga_id, tabela, modo, "em_andamento", 0, motivo=str(exc))
@@ -138,6 +145,11 @@ async def _coletar(
         tabela_id = await _tabela_id(con, tabela)
         await _registrar_assinatura(con, carga_id)
         publicado = await publicar(con, carga_id, tabela_id, tabela, parcial=modo == "incremental")
+        if continua_em is not None:
+            await con.execute(
+                text("UPDATE carga SET continua_em = :p WHERE id = :c"),
+                {"c": carga_id, "p": continua_em},
+            )
     return ResultadoColeta(
         carga_id,
         tabela,
@@ -147,13 +159,18 @@ async def _coletar(
         publicado.contagem,
         publicado.total,
         publicado.motivo_retencao,
+        continua_em,
     )
 
 
 async def _abrir_ou_retomar(
     engine: AsyncEngine, tabela: str, modo: Modo | None
 ) -> tuple[int, Modo, int]:
-    """Carga a usar: a completa interrompida desta tabela, ou uma nova."""
+    """Carga a usar: a completa interrompida desta tabela, ou uma nova.
+
+    O terceiro valor é a última página já lida: o checkpoint da completa retomada, ou,
+    na incremental em trechos, a página anterior à `continua_em` da última carga.
+    """
     async with engine.begin() as con:
         await travar(con, tabela)
         await con.execute(
@@ -202,7 +219,20 @@ async def _abrir_ou_retomar(
                 {"t": tabela_id, "modo": modo},
             )
         ).scalar_one()
-        return carga_id, modo, 0
+        ja_lidas = 0
+        if modo == "incremental":
+            continua_em: int | None = (
+                await con.execute(
+                    text(
+                        "SELECT continua_em FROM carga WHERE tabela_id = :t"
+                        " AND status IN ('publicada', 'sem_mudanca')"
+                        " ORDER BY id DESC LIMIT 1"
+                    ),
+                    {"t": tabela_id},
+                )
+            ).scalar_one_or_none()
+            ja_lidas = (continua_em or 1) - 1
+        return carga_id, modo, ja_lidas
 
 
 async def _ler_tudo(
@@ -242,20 +272,35 @@ async def _ler_tudo(
 
 
 async def _ler_o_topo(
-    engine: AsyncEngine, cliente: ClienteANS, config: Config, carga_id: int, tabela: str
-) -> int:
-    """Lê do começo até 2 páginas seguidas sem novidade (ou até o fim da tabela)."""
+    engine: AsyncEngine,
+    cliente: ClienteANS,
+    config: Config,
+    carga_id: int,
+    tabela: str,
+    ultima_pagina: int,
+    max_paginas: int | None,
+) -> tuple[int, int | None]:
+    """Lê da página seguinte a `ultima_pagina` até 2 páginas seguidas sem novidade
+    (ou até o fim da tabela, ou até `max_paginas` nesta execução).
+
+    Devolve quantas leu e onde a próxima incremental continua (`None` = chegou aos
+    códigos conhecidos; a próxima começa de novo pela página 1).
+    """
     sem_novidade = 0
-    numero = 1
+    lidas = 0
+    numero = ultima_pagina + 1
     while True:
         pagina = await cliente.pagina(tabela, numero)
         conceitos = await _gravar_pagina(engine, config, carga_id, tabela, pagina)
+        lidas += 1
         if await _tem_novidade(engine, tabela, conceitos):
             sem_novidade = 0
         else:
             sem_novidade += 1
         if sem_novidade >= PAGINAS_CONHECIDAS_PARA_PARAR or numero >= pagina.total_paginas:
-            return numero
+            return lidas, None
+        if max_paginas is not None and lidas >= max_paginas:
+            return lidas, numero + 1
         numero += 1
 
 

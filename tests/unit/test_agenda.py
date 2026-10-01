@@ -22,7 +22,7 @@ def _tabela(paginas: int, carregada: bool = True, dias: int | None = 1) -> Situa
         (_tabela(239, dias=None), "completa"),  # nunca teve completa
         (_tabela(1783, dias=1), "incremental"),  # tuss-20 com completa recente
         (_tabela(1783, dias=31), "completa"),  # tuss-20: completa mensal, em trechos
-        (_tabela(55592, dias=None), "incremental"),  # tuss-19: nunca lida inteira pela API
+        (_tabela(55592, dias=None), None),  # tuss-19 carregada: fica com `tuss recuperar`
         (_tabela(1783, carregada=False), None),  # primeira carga da 20: por arquivo
         (_tabela(144, carregada=False), "completa"),  # tuss-18: primeira carga pela API
         (_tabela(55592, carregada=False), None),  # tuss-19: primeira carga por arquivo
