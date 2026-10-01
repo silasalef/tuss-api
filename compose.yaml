@@ -130,6 +130,7 @@ services:
     command: ["tuss", "recuperar"]
     environment:
       TUSS_DB_SENHA_INGESTAO: ${TUSS_DB_SENHA_INGESTAO:?defina TUSS_DB_SENHA_INGESTAO no .env}
+      TUSS_HEARTBEAT_RECUPERACAO_URL: ${TUSS_HEARTBEAT_RECUPERACAO_URL:-}
     volumes:
       - snapshots:/var/lib/tuss/snapshots
     depends_on:

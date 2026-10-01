@@ -44,6 +44,9 @@ class Config(BaseSettings):
     worker_hora_utc: int = Field(default=6, ge=0, le=23)
     # Endereço de heartbeat (ex.: healthchecks.io) avisado ao fim de cada ciclo; vazio = não avisa.
     heartbeat_url: str = ""
+    # Idem para o serviço de recuperação (tabelas 19 e 64): outro check, para um não
+    # esconder a falha do outro.
+    heartbeat_recuperacao_url: str = ""
 
     def url_banco(self, papel: str) -> URL:
         """Endereço de conexão (driver asyncpg) para um dos três papéis."""

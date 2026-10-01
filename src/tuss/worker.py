@@ -14,10 +14,10 @@ import asyncio
 import signal
 from datetime import UTC, datetime, timedelta
 
-import httpx
 import structlog
 
 from tuss.config import Config
+from tuss.heartbeat import avisar
 from tuss.ingestion.ciclo import ResultadoTabela, executar_ciclo
 from tuss.ingestion.fonte import ClienteANS
 
@@ -39,7 +39,7 @@ async def rodar_ciclo(config: Config) -> list[ResultadoTabela]:
             resultados = await executar_ciclo(ans, config, inicio)
     except Exception:
         log.exception("ciclo_falhou")
-        await _avisar(config, ok=False, resumo="ciclo falhou antes de terminar")
+        await avisar(config.heartbeat_url, ok=False, resumo="ciclo falhou antes de terminar")
         raise
     falhas = [r for r in resultados if r.status == "falhou"]
     resumo = "\n".join(f"{r.tabela}: {r.status} {r.detalhe}".strip() for r in resultados)
@@ -50,7 +50,7 @@ async def rodar_ciclo(config: Config) -> list[ResultadoTabela]:
         falhas=len(falhas),
         minutos=round(minutos),
     )
-    await _avisar(config, ok=not falhas, resumo=resumo)
+    await avisar(config.heartbeat_url, ok=not falhas, resumo=resumo)
     return resultados
 
 
@@ -80,14 +80,3 @@ def main(config: Config) -> None:
             log.info("worker_parado")
 
     asyncio.run(_principal())
-
-
-async def _avisar(config: Config, *, ok: bool, resumo: str) -> None:
-    if not config.heartbeat_url:
-        return
-    url = config.heartbeat_url.rstrip("/") + ("" if ok else "/fail")
-    try:
-        async with httpx.AsyncClient(timeout=30) as http:
-            await http.post(url, content=resumo[:10_000].encode())
-    except httpx.HTTPError as exc:  # sem aviso, o serviço de heartbeat alerta sozinho
-        log.warning("heartbeat_falhou", erro=repr(exc))
