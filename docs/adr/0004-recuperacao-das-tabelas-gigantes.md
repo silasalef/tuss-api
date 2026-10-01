@@ -22,3 +22,9 @@ A coleta incremental lê do topo da lista até achar códigos já conhecidos. Aq
 - Enquanto a recuperação lê páginas do meio da lista, a ANS pode incluir códigos novos no topo. A lista anda para baixo e o trecho seguinte relê alguns códigos, sem pular nenhum. Os novos do topo entram quando a tabela ficar em dia e a leitura voltar à página 1. Se a ANS retirar códigos no meio da leitura, a lista anda para cima e pode pular algum. Isso só seria corrigido com um arquivo novo do portal.
 - Alterações e remoções no meio dessas tabelas continuam dependendo de arquivo do portal, porque a API não é lida inteira.
 - As falhas do serviço de recuperação ficam só no log. O heartbeat cobre apenas o worker.
+
+## Em aberto: alteração de código antigo sobe ao topo da lista?
+
+Para códigos novos, isso está confirmado (`docs/ordem-da-fonte.md`). Para códigos antigos alterados, ainda não. Na recuperação da tuss-64 (01/10/2026), as 541 alterações apareceram nas primeiras 80 páginas. Eram todas códigos antigos (40103447 a 90621255) que ganharam início de vigência 01/08/2026, com mudança de grupo e forma de envio. Isso indica que a ANS põe no topo os códigos com vigência nova. Ainda não sabemos se uma correção sem vigência nova, como um ajuste na descrição, também sobe.
+
+Como confirmar: na próxima leitura completa da tuss-20, feita pelo worker a cada 30 dias (a primeira vence por volta de 30/10/2026), comparar as alterações que ela encontrar com as que as incrementais diárias já tinham pego. Se a completa achar alterações que as incrementais não pegaram, a premissa cai. Aí, nas tabelas 19 e 64, essas alterações só entram com arquivo novo do portal, como já acontece com as remoções.
