@@ -21,6 +21,7 @@ A coleta incremental lê do topo da lista até achar códigos já conhecidos. Aq
 - A recuperação aparece aos poucos na API e no feed de mudanças, como inclusões, a cada trecho publicado. Se o processo parar, perde no máximo o trecho em andamento.
 - Enquanto a recuperação lê páginas do meio da lista, a ANS pode incluir códigos novos no topo. A lista anda para baixo e o trecho seguinte relê alguns códigos, sem pular nenhum. Os novos do topo entram quando a tabela ficar em dia e a leitura voltar à página 1. Se a ANS retirar códigos no meio da leitura, a lista anda para cima e pode pular algum. Isso só seria corrigido com um arquivo novo do portal.
 - Alterações e remoções no meio dessas tabelas continuam dependendo de arquivo do portal, porque a API não é lida inteira.
+- Velocidade medida (02/10/2026, primeiras ~9 h do serviço): ~70 páginas/h por tabela, menos de 1 min por página, e um trecho de 20 páginas a cada ~15 min. A ANS respondeu bem mais rápido do que os ~2,5 min estimados. Nesse ritmo a recuperação leva uns 3 dias e meio, não mais de uma semana. A velocidade depende da ANS e pode mudar.
 - A recuperação avisa um heartbeat próprio (`TUSS_HEARTBEAT_RECUPERACAO_URL`), separado do worker para um não esconder a falha do outro: sucesso a cada trecho e `/fail` depois de 3 falhas seguidas da mesma tabela.
 
 ## Em aberto: alteração de código antigo sobe ao topo da lista?
