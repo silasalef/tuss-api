@@ -12,8 +12,9 @@ Política de cada tabela (`escolher_modo`, ADR 0001):
   alcançar a API (o arquivo ficou meses atrás e isso leva dias). Quando a recuperação
   deixa a tabela em dia, ela entra no ciclo só com a incremental (nunca a completa).
 
-Ordem: da menor tabela para a maior, e as leituras completas longas por último.
-Assim as tabelas rápidas ficam prontas cedo e uma tabela demorada não segura as outras.
+Ordem (`ordenar`): da menor tabela para a maior, as leituras completas longas depois, e
+as gigantes (19 e 64) sempre no fim. Assim as tabelas rápidas ficam prontas cedo e uma
+tabela demorada não segura as outras.
 Uma tabela com problema não impede as outras. Se a ANS parar de responder em 3
 tabelas seguidas, o ciclo termina: ela está fora do ar, e insistir não ajuda.
 """
@@ -90,10 +91,7 @@ async def executar_ciclo(
 
     resultados = []
     falhas_da_fonte = 0
-    situacoes = await carregar_situacoes(config)
-    # Da menor para a maior, completas longas por último (ver docstring do módulo).
-    situacoes.sort(key=lambda t: (_longa(t, agora), t.paginas))
-    for tabela in situacoes:
+    for tabela in ordenar(await carregar_situacoes(config), agora):
         modo, motivo = escolher_modo(tabela, agora)
         if modo is None:
             resultados.append(ResultadoTabela(tabela.codigo, "pulada", motivo))
@@ -138,6 +136,15 @@ async def executar_ciclo(
     return resultados
 
 
+def ordenar(situacoes: list[SituacaoTabela], agora: datetime) -> list[SituacaoTabela]:
+    """Menor para a maior, completas longas depois e gigantes no fim (docstring do módulo)."""
+    return sorted(situacoes, key=lambda t: (_gigante(t), _longa(t, agora), t.paginas))
+
+
+def _gigante(t: SituacaoTabela) -> bool:
+    return t.paginas > MAX_PAGINAS_COMPLETA
+
+
 def _longa(t: SituacaoTabela, agora: datetime) -> bool:
     return escolher_modo(t, agora)[0] == "completa" and t.paginas > PAGINAS_POR_EXECUCAO
 
@@ -147,7 +154,7 @@ def em_recuperacao(t: SituacaoTabela) -> bool:
 
     Em dia, volta para o ciclo. Uma importação de arquivo nova a põe de volta aqui.
     """
-    return t.carregada and t.paginas > MAX_PAGINAS_COMPLETA and not t.em_dia
+    return t.carregada and _gigante(t) and not t.em_dia
 
 
 async def carregar_situacoes(config: Config) -> list[SituacaoTabela]:

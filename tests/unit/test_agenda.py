@@ -2,7 +2,7 @@ from datetime import UTC, datetime, timedelta, timezone
 
 import pytest
 
-from tuss.ingestion.ciclo import SituacaoTabela, escolher_modo
+from tuss.ingestion.ciclo import SituacaoTabela, escolher_modo, ordenar
 from tuss.worker import proxima_execucao
 
 AGORA = datetime(2026, 10, 1, 12, tzinfo=UTC)
@@ -62,3 +62,26 @@ def test_grande_sem_carga_explica_o_que_fazer() -> None:
 )
 def test_proxima_execucao(agora: datetime, esperado: datetime) -> None:
     assert proxima_execucao(agora, 6) == esperado
+
+
+def test_gigantes_ficam_sempre_no_fim() -> None:
+    def tabela(codigo: str, paginas: int, dias: int) -> SituacaoTabela:
+        ultima = AGORA - timedelta(days=dias)
+        return SituacaoTabela(
+            codigo, paginas, True, ultima, completa_interrompida=False, em_dia=True
+        )
+
+    situacoes = [
+        tabela("tuss-64", 65509, 1),
+        tabela("tuss-20", 1783, 31),  # completa mensal vencida: leitura longa
+        tabela("tuss-19", 55592, 1),
+        tabela("tuss-22", 239, 1),
+        tabela("tuss-23", 1, 1),
+    ]
+    assert [t.codigo for t in ordenar(situacoes, AGORA)] == [
+        "tuss-23",
+        "tuss-22",
+        "tuss-20",
+        "tuss-19",
+        "tuss-64",
+    ]

@@ -10,7 +10,7 @@ A coleta incremental lê do topo da lista até achar códigos já conhecidos. Aq
 
 ## Decisão
 
-- O ciclo diário do worker deixa de coletar as tabelas com mais de 2.000 páginas e passa a seguir da menor tabela para a maior.
+- O ciclo diário do worker deixa de coletar as tabelas com mais de 2.000 páginas e passa a seguir da menor tabela para a maior, com as gigantes (19 e 64) sempre no fim, mesmo depois das leituras completas longas.
 - Um serviço separado, `recuperacao` (`tuss recuperar`, `src/tuss/recuperacao.py`), roda o tempo todo, com uma tarefa por tabela gigante, em paralelo. Continua valendo uma requisição por vez por tabela.
 - A incremental passa a aceitar trechos (`max_paginas`). Cada trecho de 20 páginas (~50 min) é publicado, e a página seguinte fica em `carga.continua_em` (migration 0008). A próxima incremental começa dali. Quando ela encontra 2 páginas seguidas de códigos conhecidos, a tabela está em dia (`continua_em` nulo) e sai do serviço. A partir do ciclo seguinte, o worker lê só o topo dela uma vez por dia, como nas tabelas médias, sem a completa mensal. Sem nenhuma tabela atrás, o serviço termina e o compose não o reinicia (`restart: on-failure`). Se uma importação de arquivo nova deixar a tabela atrás de novo, ela volta para o serviço: basta `docker compose up -d recuperacao`. (Mudança de 03/10/2026, quando a tuss-19 ficou em dia. Antes o próprio serviço lia o topo uma vez por dia.)
 - O container tem limite de 256 MB e meia CPU. O trabalho é quase todo espera pela ANS.
