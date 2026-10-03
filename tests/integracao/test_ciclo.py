@@ -9,6 +9,7 @@ import httpx
 import pytest
 from conftest import BancoDeTeste
 
+from tuss import recuperacao
 from tuss.config import PAPEL_API, Config
 from tuss.ingestion.ciclo import executar_ciclo
 from tuss.ingestion.coleta import coletar
@@ -126,3 +127,20 @@ async def test_tabela_gigante_carregada_fica_com_a_recuperacao(config: Config) -
     assert opme_resultado.status == "pulada"
     assert "tuss recuperar" in opme_resultado.detalhe
     assert "tuss-19" not in ans.pedidas
+
+
+async def test_tabela_gigante_em_dia_volta_para_o_ciclo(config: Config) -> None:
+    opme = [{**r, "source": "tuss-19"} for r in TUSS_22]
+    ans = ANSFalsa({"tuss-19": opme, "tuss-22": TUSS_22, "tuss-23": TUSS_23})
+    async with ClienteANS(transporte=httpx.MockTransport(ans), espera_base_s=0) as cliente:
+        await coletar("tuss-19", cliente, config, modo="completa")
+        # A recuperação alcança os códigos conhecidos: a tabela está em dia.
+        r = await coletar("tuss-19", cliente, config, modo="incremental", max_paginas=20)
+        assert r.continua_em is None
+        await recuperacao.rodar_para_sempre(config)  # nada atrás: termina na hora
+        ans.pedidas.clear()
+        resultados = await executar_ciclo(cliente, config, AGORA)
+
+    opme_resultado = next(r for r in resultados if r.tabela == "tuss-19")
+    assert opme_resultado.status == "sem_mudanca"
+    assert "tuss-19" in ans.pedidas

@@ -7,10 +7,10 @@ Política de cada tabela (`escolher_modo`, ADR 0001):
 - até 2.000 páginas (a 20 tem ~1.800): incremental todo dia e completa a cada 30 dias.
   Nenhuma execução lê mais de 300 páginas (~5 h): a completa de uma tabela maior que
   isso é dividida em trechos, um por ciclo, retomando de onde parou;
-- maior que isso (19 e 64): fora do ciclo. A primeira carga vem de arquivo do portal
-  (`tuss importar`) e a incremental fica com o serviço de recuperação
-  (`tuss recuperar`), que roda o tempo todo em trechos: o arquivo ficou meses atrás da
-  API e alcançar a diferença leva dias.
+- maior que isso (19 e 64): a primeira carga vem de arquivo do portal
+  (`tuss importar`), e o serviço de recuperação (`tuss recuperar`) lê em trechos até
+  alcançar a API (o arquivo ficou meses atrás e isso leva dias). Quando a recuperação
+  deixa a tabela em dia, ela entra no ciclo só com a incremental (nunca a completa).
 
 Ordem: da menor tabela para a maior, e as leituras completas longas por último.
 Assim as tabelas rápidas ficam prontas cedo e uma tabela demorada não segura as outras.
@@ -50,6 +50,7 @@ class SituacaoTabela:
     carregada: bool
     ultima_completa_em: datetime | None  # coleta completa ou importação de arquivo
     completa_interrompida: bool
+    em_dia: bool = False  # a última carga foi uma incremental da API que chegou ao fim
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,7 +68,7 @@ def escolher_modo(t: SituacaoTabela, agora: datetime) -> tuple[Modo | None, str]
         if t.paginas > PAGINAS_POR_EXECUCAO:
             return None, f"~{t.paginas} páginas: carga inicial por arquivo (tuss importar)"
         return "completa", "primeira carga"
-    if gigante(t):
+    if em_recuperacao(t):
         return None, "coletada pelo serviço de recuperação (tuss recuperar)"
     if t.paginas <= PAGINAS_SEMPRE_COMPLETA:
         return "completa", "tabela pequena"
@@ -141,9 +142,12 @@ def _longa(t: SituacaoTabela, agora: datetime) -> bool:
     return escolher_modo(t, agora)[0] == "completa" and t.paginas > PAGINAS_POR_EXECUCAO
 
 
-def gigante(t: SituacaoTabela) -> bool:
-    """Grande demais para a API inteira (19 e 64): vive no serviço de recuperação."""
-    return t.paginas > MAX_PAGINAS_COMPLETA
+def em_recuperacao(t: SituacaoTabela) -> bool:
+    """Gigante (19 e 64) ainda atrás da API: fica com o serviço de recuperação.
+
+    Em dia, volta para o ciclo. Uma importação de arquivo nova a põe de volta aqui.
+    """
+    return t.carregada and t.paginas > MAX_PAGINAS_COMPLETA and not t.em_dia
 
 
 async def carregar_situacoes(config: Config) -> list[SituacaoTabela]:
@@ -159,7 +163,13 @@ async def carregar_situacoes(config: Config) -> list[SituacaoTabela]:
                        EXISTS (SELECT 1 FROM carga c
                                WHERE c.tabela_id = t.id AND c.status = 'em_andamento'
                                  AND c.origem = 'api' AND c.modo = 'completa')
-                           AS completa_interrompida
+                           AS completa_interrompida,
+                       COALESCE((SELECT c.origem = 'api' AND c.modo = 'incremental'
+                                        AND c.continua_em IS NULL
+                                 FROM carga c
+                                 WHERE c.tabela_id = t.id
+                                   AND c.status IN ('publicada', 'sem_mudanca')
+                                 ORDER BY c.id DESC LIMIT 1), false) AS em_dia
                 FROM tabela_tuss t
                 ORDER BY t.numero::integer
                 """)
@@ -171,6 +181,7 @@ async def carregar_situacoes(config: Config) -> list[SituacaoTabela]:
                     linha.carregada,
                     linha.ultima_completa_em,
                     linha.completa_interrompida,
+                    linha.em_dia,
                 )
                 for linha in linhas
             ]

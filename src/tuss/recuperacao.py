@@ -7,8 +7,9 @@ por dias e só publicaria no fim. Aqui cada tabela tem sua própria tarefa, em p
 
 - lê um trecho de `PAGINAS_POR_TRECHO` páginas, publica e continua no trecho seguinte
   (a página fica em `carga.continua_em`; se o processo parar, volta dali);
-- quando alcança os códigos já conhecidos, a tabela está em dia: passa a ler só o topo
-  da lista uma vez por dia, como o worker faz com as outras;
+- quando alcança os códigos já conhecidos, a tabela está em dia e sai daqui: a partir
+  do ciclo seguinte, o worker lê só o topo da lista dela uma vez por dia, como nas
+  outras. Sem nenhuma tabela atrás, o serviço termina (e o compose não o reinicia);
 - se a ANS falhar, espera e tenta de novo.
 
 Avisa o heartbeat próprio (`TUSS_HEARTBEAT_RECUPERACAO_URL`) a cada trecho publicado,
@@ -29,14 +30,13 @@ import structlog
 
 from tuss.config import Config
 from tuss.heartbeat import avisar
-from tuss.ingestion.ciclo import carregar_situacoes, gigante
+from tuss.ingestion.ciclo import carregar_situacoes, em_recuperacao
 from tuss.ingestion.coleta import coletar
 from tuss.ingestion.fonte import ClienteANS
 
 log = structlog.get_logger("tuss.recuperacao")
 
 PAGINAS_POR_TRECHO = 20  # ~50 min de leitura entre uma publicação e outra
-ESPERA_EM_DIA_S = 24 * 3600
 ESPERA_APOS_FALHA_S = 15 * 60
 FALHAS_PARA_AVISAR = 3
 
@@ -60,7 +60,7 @@ class Avisos:
 
 
 async def acompanhar(tabela: str, config: Config, avisos: Avisos) -> None:
-    """Laço de uma tabela: trechos seguidos até ficar em dia, depois uma vez por dia."""
+    """Laço de uma tabela: trechos seguidos até ficar em dia."""
     while True:
         espera: float = 0
         try:
@@ -77,10 +77,11 @@ async def acompanhar(tabela: str, config: Config, avisos: Avisos) -> None:
                 continua_em=r.continua_em,
                 **(r.contagem or {}),
             )
-            if r.continua_em is None:
-                espera = ESPERA_EM_DIA_S
             situacao = "em dia" if r.continua_em is None else f"continua na página {r.continua_em}"
             await avisos.sucesso(tabela, f"{tabela}: {r.status}, {situacao}")
+            if r.continua_em is None:
+                log.info("tabela_em_dia", tabela=tabela, proximo="ciclo diário do worker")
+                return
         except Exception as exc:  # fonte fora, banco, dado inválido: registra e tenta depois
             log.exception("trecho_falhou", tabela=tabela)
             await avisos.falha(tabela, f"{tabela}: {exc!r}")
@@ -91,8 +92,11 @@ async def acompanhar(tabela: str, config: Config, avisos: Avisos) -> None:
 
 
 async def rodar_para_sempre(config: Config) -> None:
-    tabelas = [t.codigo for t in await carregar_situacoes(config) if t.carregada and gigante(t)]
+    tabelas = [t.codigo for t in await carregar_situacoes(config) if em_recuperacao(t)]
     log.info("recuperacao_inicio", tabelas=tabelas)
+    if not tabelas:
+        log.info("recuperacao_fim", motivo="nenhuma tabela atrás da API")
+        return
     avisos = Avisos(config.heartbeat_recuperacao_url)
     await asyncio.gather(*(acompanhar(t, config, avisos) for t in tabelas))
 

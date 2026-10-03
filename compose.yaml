@@ -120,13 +120,14 @@ services:
         max-size: 10m
         max-file: "3"
 
-  # Incremental das tabelas gigantes (19 e 64), o tempo todo, em trechos de 20 páginas
-  # (src/tuss/recuperacao.py). Passa quase todo o tempo esperando a ANS: pouca CPU e
-  # memória, mas com limite para não pesar na VPS.
+  # Incremental das tabelas gigantes (19 e 64) em trechos de 20 páginas, até alcançarem
+  # a API (src/tuss/recuperacao.py). Cada tabela em dia passa para o worker; sem nenhuma
+  # atrás, o serviço termina e fica parado (on-failure só reinicia se ele quebrar).
+  # Passa quase todo o tempo esperando a ANS: pouca CPU e memória, mas com limite.
   recuperacao:
     build: .
     image: tuss-api:local
-    restart: unless-stopped
+    restart: on-failure
     command: ["tuss", "recuperar"]
     environment:
       TUSS_DB_SENHA_INGESTAO: ${TUSS_DB_SENHA_INGESTAO:?defina TUSS_DB_SENHA_INGESTAO no .env}
