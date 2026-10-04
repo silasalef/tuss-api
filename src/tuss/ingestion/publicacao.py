@@ -261,7 +261,8 @@ async def _finalizar(
     """Marca a carga como publicada; sem nenhuma mudança, como `sem_mudanca`.
 
     Em `sem_mudanca` a carga atual da tabela continua a anterior: é nela que estão
-    as versões publicadas.
+    as versões publicadas. Com mudança, refaz o vocabulário da tabela, que a busca usa
+    para corrigir erro de digitação (migration 0011).
     """
     status = "publicada" if any(contagem.values()) else "sem_mudanca"
     await con.execute(
@@ -280,6 +281,8 @@ async def _finalizar(
         ),
         {"carga": carga_id, "tabela": tabela_id, "publicada": status == "publicada"},
     )
+    if status == "publicada":
+        await con.execute(text("SELECT tuss_reconstroi_vocabulario(:t)"), {"t": tabela_id})
     return status
 
 

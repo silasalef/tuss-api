@@ -222,10 +222,29 @@ async def buscar_por_codigo(
 # ("parafuso" está em 461 mil conceitos da tuss-19) não precisa ter a relevância de todos
 # calculada para devolver 50: com uma palavra genérica eles empatam, e quem quer algo
 # específico refina a busca. Termos raros ficam abaixo do teto e continuam exatos.
-# Limitação conhecida: nas tabelas gigantes (19, 64), com erro de digitação, os 1.000
-# parecidos são quaisquer, não os mais parecidos (ordenar exigiria índice GiST de
-# trigramas por tabela).
 MAX_CANDIDATOS = 1000
+
+# Correção de erro de digitação, palavra por palavra (migration 0011). Só palavras de
+# letras com 3 ou mais; quem já existe na tabela fica como está. As outras viram a
+# palavra do vocabulário que mais combina parecença e frequência, entre as 20 mais
+# parecidas: "parafuzo" vira "parafuso" (comum), não "parafu" (rara, mais parecida).
+_CORRIGIR = """
+SELECT string_agg(coalesce(c.palavra, x.w), ' ' ORDER BY x.ordem)
+FROM regexp_split_to_table(lower(tuss_sem_acento(:termo)), '\\s+') WITH ORDINALITY x(w, ordem)
+LEFT JOIN LATERAL (
+    SELECT k.palavra FROM (
+        SELECT palavra, n FROM vocabulario
+        WHERE tabela_id = :tabela AND x.w ~ '^[a-z]{3,}$'
+          AND NOT EXISTS (SELECT 1 FROM vocabulario
+                          WHERE tabela_id = :tabela AND palavra = x.w)
+        ORDER BY palavra <-> x.w
+        LIMIT 20
+    ) k
+    WHERE similarity(k.palavra, x.w) >= 0.4
+    ORDER BY similarity(k.palavra, x.w) * ln(1 + k.n) DESC
+    LIMIT 1
+) c ON true
+"""
 
 
 async def buscar_por_texto(
@@ -233,14 +252,19 @@ async def buscar_por_texto(
 ) -> list[Row[Any]]:
     """Descrições que batem com `termo`, das mais para as menos relevantes.
 
-    Primeiro as que têm todas as palavras (full-text, pela raiz da palavra); depois
-    as parecidas (trigramas, para erro de digitação). Empate: ordem de código.
+    Primeiro as que têm todas as palavras (full-text, pela raiz da palavra), do termo
+    como veio ou com as palavras corrigidas (`_CORRIGIR`); depois as parecidas
+    (trigramas da frase, para o que a correção não resolve). Empate: ordem de código.
     Cada tipo contribui com no máximo `MAX_CANDIDATOS` conceitos para a ordenação.
     """
+    corrigido: str | None = (
+        await con.execute(text(_CORRIGIR), {"tabela": tabela_id, "termo": termo})
+    ).scalar_one()
     resultado = await con.execute(
         text(f"""
         WITH termo AS (
-            SELECT websearch_to_tsquery('portuguese', tuss_sem_acento(:termo)) AS consulta,
+            SELECT websearch_to_tsquery('portuguese', tuss_sem_acento(:termo))
+                   || websearch_to_tsquery('portuguese', :corrigido) AS consulta,
                    lower(tuss_sem_acento(:termo)) AS normalizado
         ), por_palavra AS (
             SELECT v.id FROM conceito_versao v, termo
@@ -248,9 +272,12 @@ async def buscar_por_texto(
               AND v.busca @@ termo.consulta
             LIMIT :candidatos
         ), parecidos AS (
+            -- Quem tem as palavras vem antes na ordem: se já são `limite`, nenhum
+            -- parecido entraria na resposta, e o passo (o mais caro) é pulado.
             SELECT v.id FROM conceito_versao v, termo
             WHERE v.tabela_id = :tabela AND v.publicado_ate IS NULL
               AND termo.normalizado <% v.descricao_normalizada
+              AND (SELECT count(*) FROM por_palavra) < :limite
             LIMIT :candidatos
         )
         SELECT {_COLUNAS_CONCEITO}
@@ -263,7 +290,13 @@ async def buscar_por_texto(
             c.codigo
         LIMIT :limite
         """),  # noqa: S608 (só trechos fixos entram no texto; valores vão como parâmetro)
-        {"tabela": tabela_id, "termo": termo, "limite": limite, "candidatos": MAX_CANDIDATOS},
+        {
+            "tabela": tabela_id,
+            "termo": termo,
+            "corrigido": corrigido or termo,
+            "limite": limite,
+            "candidatos": MAX_CANDIDATOS,
+        },
     )
     return list(resultado)
 

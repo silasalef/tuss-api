@@ -8,6 +8,7 @@ import httpx
 import pytest
 from conftest import BancoDeTeste, auth
 
+from tuss.config import PAPEL_API
 from tuss.ingestion.importacao import importar
 from tuss.ingestion.lote import ler_lote
 
@@ -68,6 +69,18 @@ async def test_tolera_erro_de_digitacao(
     cliente: httpx.AsyncClient, carregado: None, q: str
 ) -> None:
     assert await _codigos(cliente, q) != []
+
+
+async def test_corrige_cada_palavra_pelo_vocabulario_da_tabela(
+    cliente: httpx.AsyncClient, carregado: None, bd: BancoDeTeste
+) -> None:
+    # A publicação montou o vocabulário (migration 0011).
+    palavras = {r.palavra for r in await bd.executar(PAPEL_API, "SELECT palavra FROM vocabulario")}
+    assert {"consulta", "domicilio", "pronto"} <= palavras
+
+    # Duas palavras erradas: corrigidas, a busca por palavras acha quem tem as duas.
+    assert (await _codigos(cliente, "consluta domicilo"))[0] == "10101020"
+    assert (await _codigos(cliente, "consluta pronnto"))[0] == "10101039"
 
 
 async def test_quem_tem_todas_as_palavras_vem_antes(
