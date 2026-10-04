@@ -53,6 +53,23 @@ async def test_fechar_a_atual_e_abrir_a_nova_na_mesma_transacao(bd: BancoDeTeste
     ]
 
 
+async def test_desde_fica_com_a_data_mais_antiga_das_versoes(bd: BancoDeTeste) -> None:
+    """Gatilho da migration 0010: data da ANS ou, sem ela, o dia da publicação."""
+    await bd.executar(PAPEL_INGESTAO, *CENARIO)
+    desde = "SELECT desde::text FROM conceito"
+    assert [tuple(r) for r in await bd.executar(PAPEL_API, desde)] == [("2026-09-01",)]
+
+    # Versão nova com início oficial mais antigo: `desde` recua.
+    await bd.executar(
+        PAPEL_INGESTAO,
+        FECHA_VERSAO_ATUAL,
+        NOVA_VERSAO.replace("publicado_de)", "publicado_de, inicio_vigencia)").replace(
+            "'2026-09-15')", "'2026-09-15', '2019-03-01')"
+        ),
+    )
+    assert [tuple(r) for r in await bd.executar(PAPEL_API, desde)] == [("2019-03-01",)]
+
+
 async def test_versao_nao_termina_antes_de_comecar(bd: BancoDeTeste) -> None:
     await bd.executar(PAPEL_INGESTAO, *CENARIO)
     with pytest.raises(DBAPIError, match="conceito_versao_check"):

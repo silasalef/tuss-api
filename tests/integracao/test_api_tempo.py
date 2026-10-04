@@ -19,7 +19,6 @@ import pytest
 from conftest import BancoDeTeste, auth, cliente_da_api
 
 from tuss.config import PAPEL_DONO
-from tuss.db import consultas
 from tuss.ingestion.decisao import aprovar
 from tuss.ingestion.importacao import importar
 from tuss.ingestion.lote import ler_lote
@@ -63,6 +62,13 @@ async def cenario(bd: BancoDeTeste, tmp_path: Path) -> AsyncIterator[httpx.Async
         f" publicado_ate = CASE publicado_ate {casos} END",
         # Eventos são gravados na transação da publicação: mesmo instante das versões.
         f"UPDATE evento_mudanca SET ocorrido_em = CASE ocorrido_em {casos} END",
+        # Na base real `publicado_de` nunca muda; aqui mudou, então `desde` (mantido pelo
+        # gatilho na inserção, migration 0010) é recalculado como na migration.
+        """
+        UPDATE conceito c SET desde = (
+            SELECT min(coalesce(v.inicio_vigencia, (v.publicado_de AT TIME ZONE 'UTC')::date))
+            FROM conceito_versao v WHERE v.conceito_id = c.id)
+        """,
     )
     async for cliente in cliente_da_api(config):
         yield cliente
@@ -168,14 +174,10 @@ async def _vigentes_pela_lista(cliente: httpx.AsyncClient, em: str) -> dict[str,
 @pytest.mark.parametrize(
     "em", ["2009-01-01", "2020-06-01", "2026-09-01", "2026-09-15", "2026-09-22", "2026-09-30"]
 )
-@pytest.mark.parametrize("max_candidatos", [-1, 1_000_000], ids=["por_codigo", "por_candidatos"])
 async def test_vigente_em_bate_com_a_consulta_codigo_a_codigo(
-    cenario: httpx.AsyncClient, em: str, max_candidatos: int, monkeypatch: pytest.MonkeyPatch
+    cenario: httpx.AsyncClient, em: str
 ) -> None:
-    """A lista (SQL) e a consulta de um código (regra em domain/vigencia.py) concordam,
-    pelos dois caminhos da lista (ordem de código e candidatos pelo índice)."""
-    monkeypatch.setattr(consultas, "MAX_CANDIDATOS_VIGENCIA", max_candidatos)
-    monkeypatch.setattr(consultas, "FRACAO_CANDIDATOS_VIGENCIA", 0)
+    """A lista (SQL) e a consulta de um código (regra em domain/vigencia.py) concordam."""
     codigos = [
         item["codigo"]
         for item in (await _get(cenario, "/v1/tabelas/22/conceitos", limite=200)).json()["itens"]

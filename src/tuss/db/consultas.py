@@ -143,15 +143,6 @@ async def versoes_de_varios(
     return list(resultado)
 
 
-# Quando a lista `vigente_em` parte do índice de início de vigência. Em data antiga
-# quase nada vale, e o que vale fica concentrado em poucas faixas de código: percorrer
-# a tabela em ordem de código atrás de 50 vigentes passa do limite de 2 s nas tabelas
-# 19 e 64. Com poucos candidatos (até o máximo e até 1/10 da tabela), é mais rápido
-# achá-los pelo índice e ordenar só eles; com muitos, a ordem de código acha 50 logo.
-MAX_CANDIDATOS_VIGENCIA = 120_000
-FRACAO_CANDIDATOS_VIGENCIA = 10
-
-
 async def listar_vigentes(
     con: AsyncConnection, tabela_id: int, em: date, apos: str | None, limite: int
 ) -> list[Row[Any]]:
@@ -161,28 +152,20 @@ async def listar_vigentes(
     respondem igual): para cada código, a última versão publicada até o dia `em` (ou a
     mais antiga, se `em` é anterior a todas); fora se o código tinha saído da lista;
     depois, datas da ANS quando existem, senão o dia em que vimos o código.
+
+    `c.desde <= :em` só descarta quem não poderia valer (migration 0010): sem ele, em
+    datas antigas das tabelas 19 e 64, conferir a versão de cada código passava de 2 s.
     """
     params: dict[str, Any] = {"tabela": tabela_id, "em": em, "limite": limite}
     filtro = ""
     if apos is not None:
         filtro = "AND c.codigo > :apos"
         params["apos"] = apos
-    origem = "conceito c"
-    if await _poucos_candidatos(con, tabela_id, em):
-        # Só entra quem tem alguma versão que poderia valer em `em`: a versão que vale
-        # é uma delas, então ninguém de fora seria vigente.
-        origem = """conceito c JOIN (
-            SELECT DISTINCT w.conceito_id FROM conceito_versao w
-            WHERE w.tabela_id = :tabela
-              AND (w.inicio_vigencia <= :em
-                   OR (w.inicio_vigencia IS NULL
-                       AND (w.publicado_de AT TIME ZONE 'UTC')::date <= :em))
-        ) k ON k.conceito_id = c.id"""
     resultado = await con.execute(
         text(f"""
         SELECT c.codigo, v.descricao, v.inicio_vigencia, v.fim_vigencia, v.fim_implantacao,
                v.atributos
-        FROM {origem}
+        FROM conceito c
         CROSS JOIN LATERAL (
             SELECT v.*, (v.publicado_de AT TIME ZONE 'UTC')::date AS dia_de,
                    (v.publicado_ate AT TIME ZONE 'UTC')::date AS dia_ate
@@ -195,6 +178,7 @@ async def listar_vigentes(
             LIMIT 1
         ) v
         WHERE c.tabela_id = :tabela {filtro}
+          AND c.desde <= :em
           AND NOT (v.dia_de <= :em AND v.dia_ate IS NOT NULL AND v.dia_ate <= :em)
           AND CASE WHEN v.inicio_vigencia IS NOT NULL
                    THEN v.inicio_vigencia <= :em
@@ -206,33 +190,6 @@ async def listar_vigentes(
         params,
     )
     return list(resultado)
-
-
-async def _poucos_candidatos(con: AsyncConnection, tabela_id: int, em: date) -> bool:
-    """Versões com início até `em` (ou sem início) são poucas perto da tabela?
-
-    Conta só até passar do máximo, lendo só o índice (tabela_id, inicio_vigencia):
-    ~15 ms mesmo na tuss-64. O tamanho da tabela vem da carga atual.
-    """
-    linha = (
-        await con.execute(
-            text("""
-            SELECT (SELECT count(*) FROM (
-                        SELECT 1 FROM conceito_versao WHERE tabela_id = :tabela
-                          AND inicio_vigencia <= :em LIMIT :max) a)
-                 + (SELECT count(*) FROM (
-                        SELECT 1 FROM conceito_versao WHERE tabela_id = :tabela
-                          AND inicio_vigencia IS NULL LIMIT :max) b) AS candidatos,
-                   (SELECT c.total FROM tabela_tuss t JOIN carga c ON c.id = t.carga_atual_id
-                    WHERE t.id = :tabela) AS total
-            """),
-            {"tabela": tabela_id, "em": em, "max": MAX_CANDIDATOS_VIGENCIA + 1},
-        )
-    ).one()
-    return bool(
-        linha.candidatos <= MAX_CANDIDATOS_VIGENCIA
-        and linha.candidatos * FRACAO_CANDIDATOS_VIGENCIA <= (linha.total or 0)
-    )
 
 
 # Maior caractere possível: "começa com X" vira o intervalo [X, X + este caractere),
