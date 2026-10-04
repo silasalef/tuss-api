@@ -21,6 +21,13 @@ const BUSCAS = [
   ["20", "amoxicilina"],
   ["20", "paracetamol"],
   ["20", "insulina"],
+  // Tabelas gigantes (1,5 e 1,8 milhão de conceitos), também com erro de digitação.
+  ["19", "marcapasso cardiaco"],
+  ["19", "fressa tungstenio"],
+  ["19", "parafuso cortical"],
+  ["64", "cateter venoso central"],
+  ["64", "cateter venozo sentral"],
+  ["64", "fio de sutura"],
 ];
 
 export const options = {
@@ -37,10 +44,10 @@ export const options = {
   summaryTrendStats: ["med", "p(95)", "p(99)", "max"],
 };
 
-// Antes de medir: junta códigos reais das duas tabelas, percorrendo as páginas.
+// Antes de medir: junta códigos reais das tabelas, percorrendo as páginas.
 export function setup() {
   const codigos = [];
-  for (const [tabela, paginas] of [["22", 30], ["20", 20]]) {
+  for (const [tabela, paginas] of [["22", 30], ["20", 20], ["19", 20], ["64", 20]]) {
     let cursor = "";
     for (let i = 0; i < paginas; i++) {
       const r = http.get(`${URL}/v1/tabelas/${tabela}/conceitos?limite=200${cursor}`, PARAMS);

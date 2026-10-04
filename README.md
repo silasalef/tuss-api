@@ -8,7 +8,7 @@ API de consulta às 65 tabelas TUSS da ANS com **histórico de versões** e **vi
 
 A ANS publica as tabelas TUSS, mas só o estado atual: não guarda histórico. A API oficial leva de 2 a 3 minutos por página de 25 itens, e os arquivos em lote das tabelas grandes ficam desatualizados. Este projeto coleta, valida e versiona esses dados para que uma consulta como "o código X estava vigente em 01/03/2026?" responda em milissegundos.
 
-A investigação da fonte está em [`docs/fonte-ans.md`](docs/fonte-ans.md) e as decisões em [`docs/adr/`](docs/adr/) (estratégia de coleta, carga inicial, vigência numa data) e os procedimentos de operação em [`docs/runbooks/`](docs/runbooks/). O desenho completo está em [`docs/PLANEJAMENTO.md`](docs/PLANEJAMENTO.md).
+A investigação da fonte está em [`docs/fonte-ans.md`](docs/fonte-ans.md) e as decisões em [`docs/adr/`](docs/adr/) (estratégia de coleta, carga inicial, vigência numa data, recuperação das tabelas gigantes, correção de erro de digitação) e os procedimentos de operação em [`docs/runbooks/`](docs/runbooks/). O desenho completo está em [`docs/PLANEJAMENTO.md`](docs/PLANEJAMENTO.md).
 
 ## Estado
 
@@ -18,6 +18,15 @@ A investigação da fonte está em [`docs/fonte-ans.md`](docs/fonte-ans.md) e as
 - [x] Fase 3: histórico, vigência e feed de mudanças
 - [ ] Fase 4: atualização automática (worker diário no ar; falta a prova de 7 dias sincronizando sozinho)
 - [ ] Fase 5: produção
+
+## Em números (04/10/2026)
+
+- **65 tabelas** e **3,33 milhões de conceitos** carregados (5,4 GB no PostgreSQL).
+- **252 mil inclusões e 541 alterações** registradas no feed de mudanças desde a primeira carga (29/09/2026).
+- **250 mil códigos** que faltavam nos arquivos do portal (tabelas 19 e 64) recuperados pela API da ANS em 3 dias e meio, em trechos publicados a cada poucos minutos.
+- **Ciclo diário** das 65 tabelas em 11 a 82 minutos, conforme a velocidade da ANS, sem falhas desde 02/10/2026.
+- **p95 de 45 ms** na consulta por código e **120 ms** na busca, com as tabelas gigantes incluídas no teste.
+- **272 testes** automatizados (unitários, de propriedade e de integração com PostgreSQL real).
 
 ## A API
 
@@ -54,7 +63,7 @@ Exemplo real (`GET /v1/tabelas/22/conceitos/10101012?em=2026-03-01`):
 
 `criterio: oficial` indica que a vigência vem das datas da ANS; sem elas, vale o período em que o código apareceu nas cargas (`observado`). Como a ANS retira códigos da lista em vez de preencher a data de fim, cada nova carga é comparada com a anterior: nada é apagado, a versão antiga é fechada e a mudança entra no feed. A regra completa está no [ADR 0003](docs/adr/0003-vigencia-numa-data.md).
 
-A busca (`q`) aceita código ou começo de código (`1010`, `1.01.01.01-2`) e texto sem acento, tolerando erro de digitação: `consluta` encontra "Consulta em consultório".
+A busca (`q`) aceita código ou começo de código (`1010`, `1.01.01.01-2`) e texto sem acento, tolerando erro de digitação: `consluta` encontra "Consulta em consultório", e `fressa tungstenio` encontra "Fresas de tungstênio" entre 1,5 milhão de materiais. Cada palavra desconhecida é corrigida pelo vocabulário da própria tabela ([ADR 0005](docs/adr/0005-correcao-de-digitacao-por-vocabulario.md)).
 
 ## Como os dados se mantêm atualizados
 
@@ -62,7 +71,7 @@ A API nunca consulta a ANS na hora de responder: responde da última carga publi
 
 - **Tabelas pequenas** (a maioria das 65): lidas inteiras todo dia.
 - **Tabelas médias** (até ~2 mil páginas, como Medicamentos): todo dia só o começo da lista, onde a ANS coloca os códigos novos (comportamento medido em [`docs/ordem-da-fonte.md`](docs/ordem-da-fonte.md)); uma vez por mês, leitura completa, dividida em trechos de uma madrugada, para detectar alterações e remoções.
-- **Tabelas gigantes** (19 e 64, com 1,4 e 1,6 milhão de códigos): carga pelo arquivo do portal e, todo dia, o começo da lista. Se aparecer novidade, o worker avisa para conferir se há arquivo novo.
+- **Tabelas gigantes** (19 e 64, com 1,5 e 1,8 milhão de códigos): carga inicial pelo arquivo do portal. Como os arquivos estavam meses atrás da API, um serviço separado leu a diferença em trechos até alcançá-la ([ADR 0004](docs/adr/0004-recuperacao-das-tabelas-gigantes.md)); desde então, o worker lê o começo da lista delas todo dia, no fim do ciclo.
 
 Cada carga passa por validação, é comparada com a anterior e só então publicada, numa única transação: nada é apagado, a versão antiga é fechada e cada mudança vira um evento no feed. Duas proteções:
 
@@ -73,14 +82,14 @@ Ao fim de cada ciclo, o worker avisa um serviço de heartbeat (healthchecks.io):
 
 ### Desempenho
 
-Teste de carga com k6 (`scripts/teste_de_carga.sh`), na VPS de desenvolvimento (4 GB, ARM64, compartilhada), com as tabelas 20 e 22 (49 mil conceitos), 30/09/2026:
+Teste de carga com k6 (`scripts/teste_de_carga.sh`), na VPS de desenvolvimento (4 GB, ARM64, compartilhada), com códigos e buscas das tabelas 19, 20, 22 e 64 (3,3 milhões de conceitos no banco), 04/10/2026:
 
 | Chamada | Meta (p95) | Medido (p95) |
 | --- | --- | --- |
-| Consulta por código | < 150 ms | 48 ms |
-| Busca por texto ou código | < 400 ms | 52 ms |
+| Consulta por código | < 150 ms | 45 ms |
+| Busca por texto ou código | < 400 ms | 120 ms |
 
-Cerca de 130 requisições por segundo, sem erros em 8 mil chamadas.
+Cerca de 110 requisições por segundo, sem erros em 7 mil chamadas. A lista de vigentes numa data (`vigente_em`) responde em até 0,4 s em qualquer data, mesmo nas tabelas gigantes.
 
 ## Rodando localmente
 
