@@ -5,8 +5,10 @@ Política de cada tabela (`escolher_modo`, ADR 0001):
 - tabela pequena (até 2 páginas): sempre completa, que custa o mesmo que ler o topo
   e ainda detecta remoções;
 - até 2.000 páginas (a 20 tem ~1.800): incremental todo dia e completa a cada 30 dias.
-  Nenhuma execução lê mais de 300 páginas (~5 h): a completa de uma tabela maior que
-  isso é dividida em trechos, um por ciclo, retomando de onde parou;
+  Vencida, a completa só começa na noite de sexta (`DIA_DA_COMPLETA`): a ANS responde
+  mais rápido no fim de semana. Nenhuma execução lê mais de 300 páginas (~5 h): a
+  completa de uma tabela maior que isso é dividida em trechos, um por ciclo, retomando
+  de onde parou (em qualquer dia);
 - maior que isso (19 e 64): a primeira carga vem de arquivo do portal
   (`tuss importar`), e o serviço de recuperação (`tuss recuperar`) lê em trechos até
   alcançar a API (o arquivo ficou meses atrás e isso leva dias). Quando a recuperação
@@ -23,7 +25,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import UTC, datetime
 
 import structlog
 from sqlalchemy import text
@@ -41,6 +43,9 @@ PAGINAS_SEMPRE_COMPLETA = 2
 PAGINAS_POR_EXECUCAO = 300  # ~5 h de leitura; também o limite para a primeira carga pela API
 MAX_PAGINAS_COMPLETA = 2000  # acima disso, a leitura completa levaria semanas
 DIAS_ENTRE_COMPLETAS = 30
+# Dia (UTC, segunda = 0) em que uma completa vencida começa: o ciclo das 6 h UTC de
+# sábado é a madrugada de sexta para sábado em Brasília (3 h).
+DIA_DA_COMPLETA = 5
 MAX_FALHAS_DA_FONTE_SEGUIDAS = 3
 
 
@@ -73,11 +78,17 @@ def escolher_modo(t: SituacaoTabela, agora: datetime) -> tuple[Modo | None, str]
         return None, "coletada pelo serviço de recuperação (tuss recuperar)"
     if t.paginas <= PAGINAS_SEMPRE_COMPLETA:
         return "completa", "tabela pequena"
-    vencida = t.ultima_completa_em is None or agora - t.ultima_completa_em > timedelta(
-        days=DIAS_ENTRE_COMPLETAS
+    # Em dias de calendário (UTC): a hora em que a última terminou não adia a próxima
+    # para a semana seguinte.
+    vencida = (
+        t.ultima_completa_em is None
+        or (agora.astimezone(UTC).date() - t.ultima_completa_em.astimezone(UTC).date()).days
+        >= DIAS_ENTRE_COMPLETAS
     )
     if t.paginas <= MAX_PAGINAS_COMPLETA and vencida:
-        return "completa", f"última completa há mais de {DIAS_ENTRE_COMPLETAS} dias"
+        if agora.astimezone(UTC).weekday() == DIA_DA_COMPLETA:
+            return "completa", f"última completa há mais de {DIAS_ENTRE_COMPLETAS} dias"
+        return "incremental", "só o topo da lista (completa vencida espera a noite de sexta)"
     return "incremental", "só o topo da lista"
 
 

@@ -161,7 +161,7 @@ Baseada no OWASP API Security Top 10 (2023). Defesa em camadas: mesmo que uma fa
 - Logs estruturados em JSON, com `request_id` na API e `carga_id` no worker.
 - `GET /v1/status` mostra a última sincronização de cada tabela: é a prova de que os dados estão atualizados.
 - Alerta mínimo: o worker avisa um serviço de heartbeat externo (ex.: healthchecks.io) ao fim de cada ciclo; sem sinal em 48 h, chega e-mail. Como a saída é do servidor para fora, isso funciona sem abrir porta nenhuma.
-- Backup: dump diário do Postgres e snapshots brutos em disco, copiados para fora do servidor. Os snapshots permitem reconstruir a base por replay; testar a restauração uma vez antes do deploy.
+- Backup: feito pelo backup diário da própria VPS, que inclui o volume do Postgres e os snapshots brutos em disco (decidido em 05/10/2026). Os snapshots permitem reconstruir a base por replay.
 - Runbooks curtos em `docs/runbooks/`: fonte fora do ar, carga retida.
 
 ## Testes e qualidade
@@ -239,7 +239,7 @@ O maior risco é a própria fonte: lenta, sem histórico, com arquivos em lote d
 | Página 1 deixar de trazer os mais recentes | Coleta incremental perde inclusões | Confirmado em 30/09/2026 que traz (`docs/ordem-da-fonte.md`); a varredura completa periódica pega o que escapar; plano B é varredura completa das tabelas pequenas e médias e reimportação de arquivo para 19 e 64 |
 | Alterações e remoções nas tabelas grandes | Só aparecem na varredura completa | Varredura em ciclo longo; datas de vigência da ANS continuam valendo entre varreduras |
 | Schema do conceito muda sem aviso | Carga com dado errado | Validação estrita; carga fica retida em vez de publicar |
-| Licença de uso dos dados | Exposição pública indevida | Portal gov.br usa CC BY-ND 3.0; creditar a ANS. Só vira questão se a API for aberta ao público; o código no GitHub e as fixtures pequenas não dependem disso |
+| Licença de uso dos dados | Exposição pública indevida | Decidido em 05/10/2026: a API e a base são de uso exclusivo do dono e não serão distribuídas nem vendidas; o GitHub tem só o código e fixtures pequenas. Fonte creditada à ANS no README |
 | Direitos da CBHPM/AMB | Problema legal | Não armazenar nem servir valores |
 
 Decisões em aberto:

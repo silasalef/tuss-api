@@ -5,7 +5,8 @@ import pytest
 from tuss.ingestion.ciclo import SituacaoTabela, escolher_modo, ordenar
 from tuss.worker import proxima_execucao
 
-AGORA = datetime(2026, 10, 1, 12, tzinfo=UTC)
+AGORA = datetime(2026, 10, 1, 12, tzinfo=UTC)  # quinta-feira
+SABADO = datetime(2026, 10, 3, 6, tzinfo=UTC)  # ciclo da noite de sexta (3 h em Brasília)
 
 
 def _tabela(
@@ -22,10 +23,10 @@ def _tabela(
     [
         (_tabela(1), "completa"),  # pequena: ler tudo custa o mesmo que o topo
         (_tabela(239), "incremental"),  # tuss-22 com completa recente
-        (_tabela(239, dias=31), "completa"),  # completa vencida
-        (_tabela(239, dias=None), "completa"),  # nunca teve completa
+        (_tabela(239, dias=31), "incremental"),  # completa vencida: espera a noite de sexta
+        (_tabela(239, dias=None), "incremental"),  # nunca teve completa: idem
         (_tabela(1783, dias=1), "incremental"),  # tuss-20 com completa recente
-        (_tabela(1783, dias=31), "completa"),  # tuss-20: completa mensal, em trechos
+        (_tabela(1783, dias=31), "incremental"),  # tuss-20 vencida, numa quinta
         (_tabela(55592, dias=None), None),  # tuss-19 carregada: fica com `tuss recuperar`
         (_tabela(55592, dias=None, em_dia=True), "incremental"),  # recuperada: só o topo
         (_tabela(1783, carregada=False), None),  # primeira carga da 20: por arquivo
@@ -85,3 +86,26 @@ def test_gigantes_ficam_sempre_no_fim() -> None:
         "tuss-19",
         "tuss-64",
     ]
+
+
+@pytest.mark.parametrize(
+    ("tabela", "modo"),
+    [
+        (_tabela(239, dias=31), "completa"),  # vencida: começa na noite de sexta
+        (_tabela(239, dias=None), "completa"),  # nunca teve completa
+        (_tabela(1783, dias=31), "completa"),  # tuss-20: completa mensal, em trechos
+        (_tabela(1783, dias=1), "incremental"),  # em dia: sábado não muda nada
+        (_tabela(1), "completa"),  # pequena: todo dia
+        (_tabela(55592, dias=None, em_dia=True), "incremental"),  # gigante: nunca completa
+    ],
+)
+def test_completa_vencida_comeca_na_noite_de_sexta(tabela: SituacaoTabela, modo: str) -> None:
+    # Ciclo das 6 h UTC de sábado = 3 h de sábado em Brasília.
+    assert escolher_modo(tabela, SABADO)[0] == modo
+
+
+def test_30_dias_contam_por_data_e_nao_pela_hora() -> None:
+    # Última completa terminou às 15 h de 01/10; o ciclo de sábado 31/10 roda às 6 h.
+    ultima = datetime(2026, 10, 1, 15, tzinfo=UTC)
+    tabela = SituacaoTabela("tuss-22", 239, True, ultima, completa_interrompida=False)
+    assert escolher_modo(tabela, datetime(2026, 10, 31, 6, tzinfo=UTC))[0] == "completa"

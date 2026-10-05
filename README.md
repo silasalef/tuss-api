@@ -70,7 +70,7 @@ A busca (`q`) aceita código ou começo de código (`1010`, `1.01.01.01-2`) e te
 A API nunca consulta a ANS na hora de responder: responde da última carga publicada e informa quando ela foi sincronizada (`sincronizado_em`). Quem busca os dados é um **worker**, que roda todo dia às 3 h (horário de Brasília):
 
 - **Tabelas pequenas** (a maioria das 65): lidas inteiras todo dia.
-- **Tabelas médias** (até ~2 mil páginas, como Medicamentos): todo dia só o começo da lista, onde a ANS coloca os códigos novos (comportamento medido em [`docs/ordem-da-fonte.md`](docs/ordem-da-fonte.md)); uma vez por mês, leitura completa, dividida em trechos de uma madrugada, para detectar alterações e remoções.
+- **Tabelas médias** (até ~2 mil páginas, como Medicamentos): todo dia só o começo da lista, onde a ANS coloca os códigos novos (comportamento medido em [`docs/ordem-da-fonte.md`](docs/ordem-da-fonte.md)); a cada 30 dias, leitura completa para detectar alterações e remoções, sempre começando na madrugada de sexta para sábado, quando a ANS responde mais rápido, e dividida em trechos de uma madrugada.
 - **Tabelas gigantes** (19 e 64, com 1,5 e 1,8 milhão de códigos): carga inicial pelo arquivo do portal. Como os arquivos estavam meses atrás da API, um serviço separado leu a diferença em trechos até alcançá-la ([ADR 0004](docs/adr/0004-recuperacao-das-tabelas-gigantes.md)); desde então, o worker lê o começo da lista delas todo dia, no fim do ciclo.
 
 Cada carga passa por validação, é comparada com a anterior e só então publicada, numa única transação: nada é apagado, a versão antiga é fechada e cada mudança vira um evento no feed. Duas proteções:
