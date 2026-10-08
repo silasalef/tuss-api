@@ -1,4 +1,4 @@
-"""Serviço de recuperação: a incremental das tabelas gigantes (19 e 64), o tempo todo.
+"""Serviço de recuperação: a incremental das tabelas gigantes (19 e 64) quando ficam atrás.
 
 O arquivo do portal dessas tabelas ficou meses atrás da API (mais de 5 mil páginas de
 diferença em cada uma, a ~2,5 min por página). Ler tudo de uma vez prenderia o worker
@@ -9,10 +9,15 @@ por dias e só publicaria no fim. Aqui cada tabela tem sua própria tarefa, em p
   (a página fica em `carga.continua_em`; se o processo parar, volta dali);
 - quando alcança os códigos já conhecidos, a tabela está em dia e sai daqui: a partir
   do ciclo seguinte, o worker lê só o topo da lista dela uma vez por dia, como nas
-  outras. Sem nenhuma tabela atrás, o serviço termina (e o compose não o reinicia);
+  outras;
+- sem nenhuma tabela atrás, confere de novo a cada `ESPERA_SEM_ATRASO_S`. Uma gigante
+  volta para cá quando a leitura do topo no worker para no limite de páginas (a ANS
+  publicou mais do que cabe num ciclo, como em 08/10/2026) ou depois de uma importação
+  de arquivo;
 - se a ANS falhar, espera e tenta de novo.
 
-Avisa o heartbeat próprio (`TUSS_HEARTBEAT_RECUPERACAO_URL`) a cada trecho publicado,
+Avisa o heartbeat próprio (`TUSS_HEARTBEAT_RECUPERACAO_URL`) a cada trecho publicado e a
+cada conferência sem atraso,
 e `/fail` quando uma tabela falha `FALHAS_PARA_AVISAR` vezes seguidas (falha isolada
 da ANS é comum e se resolve sozinha). Enquanto uma tabela estiver falhando, o sucesso
 da outra não manda aviso de sucesso, para não esconder a falha.
@@ -39,6 +44,7 @@ log = structlog.get_logger("tuss.recuperacao")
 PAGINAS_POR_TRECHO = 20  # ~50 min de leitura entre uma publicação e outra
 ESPERA_APOS_FALHA_S = 15 * 60
 FALHAS_PARA_AVISAR = 3
+ESPERA_SEM_ATRASO_S = 3600
 
 
 class Avisos:
@@ -91,14 +97,28 @@ async def acompanhar(tabela: str, config: Config, avisos: Avisos) -> None:
             await asyncio.sleep(espera)
 
 
-async def rodar_para_sempre(config: Config) -> None:
+async def rodada(config: Config, avisos: Avisos) -> list[str]:
+    """Recupera as gigantes que estão atrás da API, até ficarem em dia. Devolve quais."""
     tabelas = [t.codigo for t in await carregar_situacoes(config) if em_recuperacao(t)]
-    log.info("recuperacao_inicio", tabelas=tabelas)
-    if not tabelas:
-        log.info("recuperacao_fim", motivo="nenhuma tabela atrás da API")
-        return
+    if tabelas:
+        log.info("recuperacao_inicio", tabelas=tabelas)
+        await asyncio.gather(*(acompanhar(t, config, avisos) for t in tabelas))
+    else:
+        await avisar(avisos.url, ok=True, resumo="nenhuma tabela atrás da API")
+    return tabelas
+
+
+async def rodar_para_sempre(config: Config) -> None:
     avisos = Avisos(config.heartbeat_recuperacao_url)
-    await asyncio.gather(*(acompanhar(t, config, avisos) for t in tabelas))
+    while True:
+        try:
+            if not await rodada(config, avisos):
+                await asyncio.sleep(ESPERA_SEM_ATRASO_S)
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # banco fora do ar ao conferir: registra e confere depois
+            log.exception("conferencia_falhou")
+            await asyncio.sleep(ESPERA_APOS_FALHA_S)
 
 
 def main(config: Config) -> None:

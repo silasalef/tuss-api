@@ -137,7 +137,7 @@ async def test_tabela_gigante_em_dia_volta_para_o_ciclo(config: Config) -> None:
         # A recuperação alcança os códigos conhecidos: a tabela está em dia.
         r = await coletar("tuss-19", cliente, config, modo="incremental", max_paginas=20)
         assert r.continua_em is None
-        await recuperacao.rodar_para_sempre(config)  # nada atrás: termina na hora
+        assert await recuperacao.rodada(config, recuperacao.Avisos("")) == []  # nada atrás
         ans.pedidas.clear()
         resultados = await executar_ciclo(cliente, config, AGORA)
 
