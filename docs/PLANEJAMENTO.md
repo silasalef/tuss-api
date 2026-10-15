@@ -161,8 +161,8 @@ Baseada no OWASP API Security Top 10 (2023). Defesa em camadas: mesmo que uma fa
 - Logs estruturados em JSON, com `request_id` na API e `carga_id` no worker.
 - `GET /v1/status` mostra a última sincronização de cada tabela: é a prova de que os dados estão atualizados.
 - Alerta mínimo: o worker avisa um serviço de heartbeat externo (ex.: healthchecks.io) ao fim de cada ciclo; sem sinal em 48 h, chega e-mail. Como a saída é do servidor para fora, isso funciona sem abrir porta nenhuma.
-- Backup: feito pelo backup diário da própria VPS, que inclui o volume do Postgres e os snapshots brutos em disco (decidido em 05/10/2026). Os snapshots permitem reconstruir a base por replay.
-- Runbooks curtos em `docs/runbooks/`: fonte fora do ar, carga retida.
+- Backup: feito pelo backup diário da própria VPS, que inclui o volume do Postgres e os snapshots brutos em disco (decidido em 05/10/2026). Os snapshots permitem reconstruir a base por replay. Restauração testada em 15/10/2026 (backup de 14/10, tudo bateu com a produção): [`docs/runbooks/restaurar-backup.md`](runbooks/restaurar-backup.md).
+- Runbooks curtos em `docs/runbooks/`: fonte fora do ar, carga retida, restaurar backup.
 
 ## Testes e qualidade
 

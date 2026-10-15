@@ -80,6 +80,8 @@ Cada carga passa por validação, é comparada com a anterior e só então publi
 
 Ao fim de cada ciclo, o worker avisa um serviço de heartbeat (healthchecks.io): se o aviso não chegar, chega um e-mail.
 
+O backup é o diário da própria VPS (cópia do disco inteiro, fora do servidor). A restauração foi testada num servidor separado e isolado da internet, e o banco voltou idêntico à produção ([runbook](docs/runbooks/restaurar-backup.md)).
+
 ### Desempenho
 
 Teste de carga com k6 (`scripts/teste_de_carga.sh`), na VPS de desenvolvimento (4 GB, ARM64, compartilhada), com códigos e buscas das tabelas 19, 20, 22 e 64 (3,3 milhões de conceitos no banco), 04/10/2026:
